@@ -8,6 +8,19 @@
 
 **Input**: User description: "Build a standalone authentication and authorization service that acts as the central identity authority for a shared frontend and multiple independent REST business APIs."
 
+## Clarifications
+
+### Session 2026-10-02
+
+- Q: What is the access-token lifetime? → A: 15 minutes, configurable.
+- Q: Are refresh tokens the renewal mechanism, how long do they last, and is rotation required? → A: Yes, opaque refresh tokens; 7-day lifetime, configurable; single-use with mandatory rotation on every renewal.
+- Q: What happens when an already-rotated or revoked refresh token is presented? → A: Request rejected and the entire session (token family) it belongs to is revoked.
+- Q: Must JWT signing use an X.509 certificate? → A: No. Asymmetric signing with an externally supplied key pair (certificate-based or raw key) is acceptable; the key mechanism is configuration, not code. Private key stays in the service; consumers get public verification material only.
+- Q: How is the first Administrator bootstrapped, and when is it allowed? → A: Via externally supplied configuration (initial email and password) applied at startup; allowed only when the store contains zero users; unavailable permanently once any user exists, and configuration is then ignored.
+- Q: Must every user have at least one role, and can a user hold several? → A: Every user MUST have at least one role at all times; users MAY hold multiple roles simultaneously.
+- Q: What is the minimum administrative password reset workflow? → A: Administrator generates a single-use, time-limited reset code shown once to the Administrator and delivered to the user out of band; the user redeems it to set a new password. No email infrastructure.
+- Q: Does logout revoke only the current session or all sessions? → A: Only the current session. Disabling a user or completing a password reset revokes all of that user's sessions.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Sign in and call a consumer API (Priority: P1)
@@ -54,13 +67,15 @@ An Administrator lists users, views one user, creates users, enables or disables
 
 **Acceptance Scenarios**:
 
-1. **Given** an authenticated Administrator, **When** they create a user with a unique email, **Then** the user exists, is identifiable by a stable unique identifier, and can sign in once they have a usable password.
+1. **Given** an authenticated Administrator, **When** they create a user with a unique email, an initial password and at least one supported role, **Then** the user exists, is identifiable by a stable unique identifier, and can sign in.
 2. **Given** an existing email, **When** an Administrator creates another user with the same email, **Then** the request is refused.
 3. **Given** an enabled user, **When** an Administrator disables them, **Then** the user can no longer obtain new authenticated access, and re-enabling restores it.
 4. **Given** a user, **When** an Administrator assigns or removes Administrator, Manager or Operator, **Then** the user's roles change accordingly and appear in tokens issued afterwards.
 5. **Given** a role name outside the three supported roles, **When** an Administrator attempts to assign it, **Then** the request is rejected and nothing changes.
 6. **Given** a Manager or Operator, **When** they attempt any user-administration operation, **Then** it is refused as forbidden.
-7. **Given** an Administrator, **When** they initiate an administrative password reset for a user, **Then** the user can set a new password and no one can ever read the old one.
+7. **Given** an Administrator, **When** they initiate a password reset for a user, **Then** a single-use, time-limited reset code is shown once to the Administrator, the user can redeem it to set a new password, all the user's sessions are revoked, and no one can ever read the old password.
+8. **Given** a user who holds exactly one role, **When** an Administrator tries to remove that role, **Then** the request is refused; the Administrator may assign another role first or disable the user.
+9. **Given** a user, **When** an Administrator assigns several supported roles, **Then** the user holds all of them and tokens carry all of them.
 
 ---
 
@@ -74,10 +89,11 @@ A signed-in user obtains a new short-lived access token without re-entering thei
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid renewal credential, **When** the user requests renewal, **Then** they receive a new access token and a new renewal credential.
-2. **Given** a renewal credential that has already been replaced, **When** it is presented again, **Then** the request is rejected.
-3. **Given** a user who signs out, **When** the revoked session's renewal credential is presented, **Then** it is rejected.
-4. **Given** a disabled user with a previously valid renewal credential, **When** they request renewal, **Then** it is refused.
+1. **Given** a valid refresh token, **When** the user requests renewal, **Then** they receive a new access token and a new refresh token, and the presented one becomes invalid.
+2. **Given** a refresh token that has already been replaced, **When** it is presented again, **Then** the request is rejected and the whole session it belongs to is revoked, including its latest refresh token.
+3. **Given** a user who signs out, **When** that session's refresh token is presented, **Then** it is rejected; the user's other sessions remain valid.
+4. **Given** a disabled user with a previously valid refresh token, **When** they request renewal, **Then** it is refused.
+5. **Given** a refresh token older than its 7-day lifetime, **When** it is presented, **Then** it is rejected.
 
 ---
 
@@ -106,8 +122,8 @@ An operator who has just installed the service establishes the first Administrat
 
 **Acceptance Scenarios**:
 
-1. **Given** a clean installation with no users, **When** the operator follows the documented procedure with the required secret configuration, **Then** one Administrator is created and can sign in.
-2. **Given** an installation that already has an Administrator, **When** the procedure is run again, **Then** it does not create or elevate any account.
+1. **Given** a clean installation with no users, **When** the service starts with the initial Administrator email and password supplied through external configuration, **Then** exactly one Administrator is created and can sign in.
+2. **Given** an installation that already contains any user, **When** the service starts with that configuration still present, **Then** it creates or elevates no account and ignores the configuration.
 3. **Given** the procedure's required configuration is missing or invalid in production, **When** the service starts, **Then** it fails clearly rather than falling back to an insecure default.
 
 ---
@@ -149,7 +165,8 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - Email comparison is case-insensitive, so `User@x.com` and `user@x.com` cannot both exist.
 - A user's roles or enabled state change while they hold a valid access token: the existing token remains valid until it expires, within the short token lifetime, and new tokens reflect the change.
 - An Administrator disables or removes the Administrator role from themselves, or from the last remaining enabled Administrator: refused, so the system is never left without an Administrator.
-- Presenting a previously replaced renewal credential is treated as possible theft; the session it belongs to is revoked.
+- Presenting a previously replaced refresh token is treated as possible theft; the session it belongs to is revoked.
+- A reset code that is expired, already used or never issued is rejected without revealing which.
 - Repeated failed sign-ins against one account or from one source are throttled.
 - A token-signing key rotation does not lock out users holding tokens signed by the previous key during the documented overlap window.
 - The service is restarted or redeployed: users, roles and sessions persist.
@@ -161,23 +178,23 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - **FR-001**: The service MUST be the sole owner of user credentials, identity, account state and role assignments; consumer APIs MUST NOT hold passwords or password hashes.
 - **FR-002**: The service MUST support exactly three roles, Administrator, Manager and Operator, and MUST NOT allow any other role to be created or assigned through the public API.
 - **FR-003**: Users MUST be able to sign in with email and password; no separate username is required.
-- **FR-004**: Each user MUST have a stable unique identifier, a unique email, an enabled/disabled state and a set of roles.
+- **FR-004**: Each user MUST have a stable unique identifier, a unique email, an enabled/disabled state and a set of roles. A user MUST always hold at least one role, MAY hold several, and user creation MUST require at least one role.
 - **FR-005**: Failed sign-ins MUST return the same externally observable response (content and, as far as practical, timing) whether the email is unknown, the password is wrong or the account is disabled.
 - **FR-006**: Disabled users MUST NOT obtain new access tokens or renew sessions.
-- **FR-007**: Successful sign-in MUST return a signed, short-lived access token carrying the user identifier, roles, issuer, intended audience and validity period.
+- **FR-007**: Successful sign-in MUST return a signed access token carrying the user identifier, roles, issuer, intended audience and validity period. The default lifetime is 15 minutes and MUST be configurable.
 - **FR-008**: Access tokens MUST be verifiable by consumer APIs using only public verification information; consumer APIs MUST NOT need private signing material, database access or a per-request call to the service.
-- **FR-009**: Private signing capability MUST be exclusive to the service and MUST NOT be exposed to consumer APIs, logs or documentation.
+- **FR-009**: Tokens MUST be signed with an asymmetric key pair supplied to the service through external configuration (a certificate is permitted but not required). Private signing capability MUST be exclusive to the service and MUST NOT be exposed to consumer APIs, logs or documentation; consumer APIs MUST receive public verification material only.
 - **FR-010**: The service MUST publish the public verification information, and support key rotation with an overlap window, in a way consumer APIs can consume as documented.
 - **FR-011**: Authenticated users MUST be able to retrieve their own identifier, email and roles, and the response MUST NOT include passwords, hashes, renewal credentials, internal authentication data or signing material.
 - **FR-012**: Administrators MUST be able to list users, retrieve a user, create users, enable and disable users, and assign and remove roles; Managers and Operators MUST be refused all of these operations.
 - **FR-013**: Administrator-only operations MUST be enforced by the service itself, never trusting role information supplied by the client.
-- **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password; Administrators MUST be able to initiate an administrative password reset without learning the old or new password.
+- **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password. Administrators MUST be able to initiate a password reset that issues a single-use, time-limited reset code (shown once, 24 hours by default, configurable) which the user redeems to choose a new password; the Administrator never learns the old or new password. Completing a reset MUST revoke all of the user's sessions. No email delivery is required.
 - **FR-015**: Passwords MUST never appear in responses or logs.
-- **FR-016**: A signed-in session MUST be renewable into a new access token and a new renewal credential without re-entering the password.
-- **FR-017**: Renewal credentials MUST be revocable; replacing one MUST invalidate the previous one, and reuse of an invalidated credential MUST be rejected.
-- **FR-018**: Signing out MUST revoke the corresponding session so its renewal credential can no longer be used.
-- **FR-019**: A clean installation MUST offer a documented, secure way to create the first Administrator, which MUST NOT be usable to create administrators once an Administrator exists.
-- **FR-020**: The service MUST NOT allow the last enabled Administrator to be disabled or stripped of the Administrator role.
+- **FR-016**: A signed-in session MUST be renewable using an opaque refresh token, yielding a new access token and a new refresh token without re-entering the password. Refresh tokens last 7 days by default (configurable) and MUST be stored only in non-recoverable form.
+- **FR-017**: Refresh tokens MUST be single-use: every successful renewal MUST invalidate the presented token. Presenting an already-replaced or revoked refresh token MUST be rejected and MUST revoke the entire session it belongs to.
+- **FR-018**: Signing out MUST revoke only the current session. Disabling a user MUST revoke all of that user's sessions.
+- **FR-019**: A clean installation MUST create the first Administrator from externally supplied configuration (initial email and password) at startup, only when the store contains no users. Once any user exists, this mechanism MUST create or modify nothing and its configuration MUST be ignored. Production MUST fail clearly if the initial password is missing when the store is empty, and the documentation MUST advise removing it after first start.
+- **FR-020**: The service MUST NOT allow the last enabled Administrator to be disabled or stripped of the Administrator role, and MUST NOT allow a user's last remaining role to be removed.
 - **FR-021**: The service MUST throttle repeated failed sign-in attempts.
 - **FR-022**: Authentication-related errors MUST use a consistent, documented error format.
 - **FR-023**: The service MUST publish reference documentation covering sign-in, renewal, sign-out, current identity, user administration, role assignment, token usage and authorization expectations.
@@ -219,9 +236,7 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 
 - The initial deployment has two consumer APIs and one shared frontend; more consumer APIs are expected over time and are all operated within the same trust domain.
 - Self-registration, social/third-party sign-in, multi-factor authentication and email-delivered password recovery are out of scope; the only password reset is administrator-initiated.
-- Administrator-initiated reset delivers the user a way to set their own new password (for example a one-time reset credential handed over out of band); the exact delivery mechanism is a planning decision.
-- Access tokens are short-lived (on the order of minutes); renewal credentials last longer (on the order of days) and are single-use.
 - Role changes and account disablement reach consumer APIs when the current access token expires, not instantly; this lag is acceptable.
-- A user may hold more than one role.
+- OAuth/OIDC, federation and external identity providers are out of scope; the service issues its own tokens only.
 - Authentication data is stored on a single node with durable storage; high availability and horizontal scaling are out of scope for this feature.
 - The architecture, technology and testing constraints in the project constitution apply to the plan and implementation, not to this specification.
