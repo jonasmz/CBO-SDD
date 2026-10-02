@@ -89,7 +89,8 @@ and MUST be checked inside the dev container during implementation.
 - **Decision**: EF Core with SQLite file on a named volume. Migrations authored with
   `docker compose run --rm dev dotnet ef migrations add ...` using a design-time context factory.
   Runtime application via the `--migrate` switch of the published image (no EF CLI needed in
-  production) and a `migrate` compose service. No `EnsureCreated`, no automatic destructive action.
+  production; it builds only the database services, so it needs no signing key) and a `migrate` compose
+  service. A normal start fails clearly when the schema is pending and then seeds roles idempotently. No `EnsureCreated`, no automatic destructive action.
   Email uniqueness enforced by Identity (`RequireUniqueEmail`) plus a unique index on normalized email.
 - **Rationale**: Constitution VI and X; production image stays free of SDK tooling.
 - **Backup**: documented as stop service then copy the volume file, or SQLite online backup using
@@ -114,7 +115,7 @@ and MUST be checked inside the dev container during implementation.
 - **Rationale**: Constitution VIII explicitly allows an equivalent configuration when exact behavior is
   not guaranteed. Server-side authorization remains the real protection.
 
-## R10. Rate limiting, CORS, health
+## R10. Rate limiting, CORS, health (spec FR-021, FR-032, FR-033)
 
 - **Decision**: built-in `AddRateLimiter` fixed-window policies by remote IP (default 10 requests per
   minute, configurable, spec FR-021) for `/api/auth/login`, `/api/auth/refresh`,

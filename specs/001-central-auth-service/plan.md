@@ -197,8 +197,11 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
   minute on login, refresh and reset-password; both configurable.
 - **Smoke validation networking**: the agent talks to the service through the `tools` container on the
   compose network (`http://dev-api:8080` or `http://auth-api:8080`), never through host-published ports.
-- **Migrations**: explicit. The runtime image supports `--migrate` (apply and exit); compose provides a
-  `migrate` service. The `dev` service sets `Database__MigrateOnStartup=true` for convenience only.
+- **Migrations**: explicit. The runtime image supports `--migrate` (database services only, no signing or
+  bootstrap validation; apply migrations, seed roles, exit); compose provides a `migrate` service. A
+  normal start never migrates unless `Database:MigrateOnStartup` is true (Development only); otherwise it
+  fails with `Database schema is not up to date; run the migrate service` when migrations are pending,
+  then seeds roles idempotently.
 - **Endpoints added beyond the suggested list, required by clarified requirements**:
   `POST /api/users/{id}/password-reset`, `POST /api/auth/reset-password`,
   `GET /.well-known/jwks.json`.

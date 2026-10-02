@@ -29,7 +29,7 @@
 - Q: What must the service log about security events? → A: Failed sign-ins (without the email or password), refresh-token reuse detection, user enable/disable, role assignment/removal, password-reset issuance and redemption, bootstrap outcome, and at startup the signing key identifier and, for certificates, the expiry date. Never secrets.
 - Q: What happens when the signing certificate expires? → A: The service does not enforce certificate validity dates (it uses the key); the expiry date is logged at startup and operators must rotate before expiry as documented.
 - Q: Who provides transport security, and how far is an Administrator trusted in a password reset? → A: TLS is terminated by the deployment (a reverse proxy); the service listens on plain HTTP behind it and the documentation forbids exposing it directly to untrusted networks. An Administrator who issues a reset code can set that user's password, so Administrators are trusted accounts.
-- Q: What must a consumer API do when it cannot reach the key endpoint? → A: Keep validating with the last keys it fetched; with no keys ever fetched, reject all tokens. Consumers refresh keys at most every 5 minutes or on an unknown key identifier.
+- Q: What must a consumer API do when it cannot reach the key endpoint? → A: Keep validating with the last keys it fetched; with no keys ever fetched, reject all tokens. Consumers refresh keys at most every 5 minutes, or on an unknown key identifier (at most once per minute).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -216,6 +216,8 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - **FR-029**: A deliberately small automated suite MUST verify critical authentication, authorization, token/session and persistence behavior; no coverage percentage is required.
 - **FR-030**: Adding another consumer API MUST require only documented configuration on the consumer side, with no change to how users authenticate.
 - **FR-031**: The service MUST log security events without secrets: failed sign-ins (no email, no password), refresh-token reuse detection, user enable/disable, role assignment/removal, password-reset issuance and redemption, bootstrap outcome, and at startup the signing key identifier and certificate expiry date when a certificate is used. Passwords, access tokens, refresh tokens, reset codes and key material MUST never be logged.
+- **FR-032**: Allowed frontend origins for cross-origin browser calls MUST be externally configured; in production no cross-origin access is allowed unless origins are configured.
+- **FR-033**: The service MUST expose an anonymous health endpoint usable for container health and readiness checks that reveals no internal detail.
 
 ### Key Entities
 
