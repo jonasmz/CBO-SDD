@@ -8,6 +8,9 @@ using AuthService.Api.Security;
 using AuthService.Api.Features.Authentication;
 using AuthService.Api.Features.Metadata;
 using AuthService.Application.Features.Authentication.Login;
+using AuthService.Application.Features.Authentication.Logout;
+using AuthService.Application.Features.Authentication.RefreshToken;
+using AuthService.Infrastructure.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -25,6 +28,8 @@ builder.Services.AddOptions<JwtOptions>().Bind(builder.Configuration.GetSection(
 builder.Services.AddJwtBearerSetup();
 builder.Services.AddAuthorizationPolicies();
 builder.Services.AddScoped<LoginHandler>();
+builder.Services.AddScoped<RefreshTokenHandler>();
+builder.Services.AddScoped<LogoutHandler>();
 builder.Services.AddScoped<BootstrapAdministratorHandler>();
 builder.Services.AddHostedService<BootstrapHostedService>();
 
@@ -48,6 +53,7 @@ static void ValidateStartupOptions(IServiceProvider services)
 {
     _ = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
     _ = services.GetRequiredService<IOptions<IdentityAccountOptions>>().Value;
+    _ = services.GetRequiredService<IOptions<AuthService.Infrastructure.Sessions.SessionOptions>>().Value;
 }
 
 static async Task ApplyMigrationsAndSeedAsync(IServiceProvider services)

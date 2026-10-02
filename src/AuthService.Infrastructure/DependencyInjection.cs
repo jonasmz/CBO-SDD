@@ -3,6 +3,7 @@ using AuthService.Application.Abstractions;
 using AuthService.Infrastructure.Tokens;
 using AuthService.Infrastructure.Identity;
 using AuthService.Infrastructure.Persistence;
+using AuthService.Infrastructure.Sessions;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,14 @@ public static class DependencyInjection
         services.AddOptions<IdentityAccountOptions>()
             .Bind(configuration.GetSection(IdentityAccountOptions.SectionName))
             .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        services.AddOptions<SessionOptions>()
+            .Bind(configuration.GetSection(SessionOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(
+                options => options.SessionMaxDays >= options.RefreshTokenDays,
+                "Session maximum lifetime must be greater than or equal to refresh-token lifetime.")
             .ValidateOnStart();
 
         services.AddDbContext<AuthDbContext>((serviceProvider, options) =>
@@ -66,6 +75,9 @@ public static class DependencyInjection
         services.AddScoped<IUserDirectory, UserDirectory>();
         services.AddScoped<IUserCreator, UserCreator>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
+        services.AddScoped<RefreshTokenStore>();
+        services.AddScoped<IRefreshTokenStore>(provider => provider.GetRequiredService<RefreshTokenStore>());
+        services.AddScoped<IUserSessionRevoker>(provider => provider.GetRequiredService<RefreshTokenStore>());
         services.AddSingleton<SigningKeyProvider>();
         services.AddSingleton<JwksBuilder>();
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
