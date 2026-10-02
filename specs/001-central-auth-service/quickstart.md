@@ -15,6 +15,17 @@ host-published ports and agent-side `curl` are never used. Contracts:
   container, see `docs/development.md` for how to find it), plus `Bootstrap__AdminEmail`,
   `Bootstrap__AdminPassword` (meets the password rule) and, for production-mode steps, `SIGNING_KEY_DIR`
 
+For production-mode steps generate a throwaway validation key once (the same command as in `docs/deployment.md`; the file must be readable by the runtime user, so this is for local validation only):
+
+```bash
+set -a; . ./.env; set +a; mkdir -p secrets
+docker compose run --rm -T --user "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}" \
+  -v "${SIGNING_KEY_DIR:-${HOST_PROJECT_DIR}/secrets}:/out" tools \
+  sh -c 'openssl genrsa -out /out/signing.pem 2048 && chmod 0644 /out/signing.pem'
+```
+
+and set `Jwt__Signing__PrivateKeyPemPath=/run/secrets/signing/signing.pem` in `.env`.
+
 Shorthand used below:
 
 ```bash

@@ -21,7 +21,7 @@ rationale are in [research.md](research.md).
 
 **Primary Dependencies**: ASP.NET Core Minimal APIs, ASP.NET Core Identity, EF Core + SQLite provider,
 `Microsoft.AspNetCore.Authentication.JwtBearer`, `Microsoft.AspNetCore.OpenApi`, `Scalar.AspNetCore`,
-`System.IdentityModel.Tokens.Jwt` / `Microsoft.IdentityModel.JsonWebTokens` (Infrastructure only)
+`Microsoft.IdentityModel.JsonWebTokens` (Infrastructure only)
 
 **Storage**: SQLite file `/data/auth.db` on a named Docker volume (`authservice-data` in production,
 separate `authservice-dev-data` for development tooling); ASP.NET Data Protection keys on the same
