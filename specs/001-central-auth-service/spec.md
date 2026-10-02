@@ -1,0 +1,227 @@
+# Feature Specification: Central Authentication and Authorization Service
+
+**Feature Branch**: `001-central-auth-service`
+
+**Created**: 2026-10-02
+
+**Status**: Draft
+
+**Input**: User description: "Build a standalone authentication and authorization service that acts as the central identity authority for a shared frontend and multiple independent REST business APIs."
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Sign in and call a consumer API (Priority: P1)
+
+A registered, enabled user signs in with their email and password and receives an access token. The shared frontend presents that token to any independent consumer API, which accepts or rejects it on its own, without contacting the authentication service or its data store.
+
+**Why this priority**: This is the core value of the service: one identity authority trusted by many independent APIs. Nothing else is useful without it.
+
+**Independent Test**: Sign in with a valid account, then validate the issued token in a separate consumer API configured only with public verification information. Repeat with a wrong password, an unknown email and a disabled account.
+
+**Acceptance Scenarios**:
+
+1. **Given** an enabled user with known credentials, **When** they sign in with email and password, **Then** they receive a signed, short-lived access token.
+2. **Given** a token issued by the service, **When** an independent consumer API validates it using only public verification information, **Then** the API can determine the user, their roles, the issuing authority, the intended audience and whether the token is still valid.
+3. **Given** a wrong password, **When** a user attempts to sign in, **Then** access is refused with a generic failure.
+4. **Given** an email that is not registered, **When** someone attempts to sign in, **Then** access is refused with a response indistinguishable from the wrong-password case.
+5. **Given** a disabled user with correct credentials, **When** they attempt to sign in, **Then** access is refused with the same generic failure.
+
+---
+
+### User Story 2 - Role-based authorization across consumer APIs (Priority: P1)
+
+Consumer APIs decide what a caller may do from the Administrator, Manager and Operator roles carried in the access token, without any lookup against the authentication service.
+
+**Why this priority**: Role enforcement is the second half of "authentication and authorization" and must hold for every consumer API.
+
+**Independent Test**: Issue tokens for one user per role. Call an Administrator-only operation with each and confirm only the Administrator is accepted.
+
+**Acceptance Scenarios**:
+
+1. **Given** a token for a user holding the Administrator role, **When** it is used on an Administrator-only operation, **Then** the operation is allowed.
+2. **Given** a token for a user holding only Manager or Operator, **When** it is used on an Administrator-only operation, **Then** the operation is refused as forbidden.
+3. **Given** a request with no token, an expired token, a tampered token, or a token from a different issuer or for a different audience, **When** it reaches a protected operation, **Then** it is rejected as unauthenticated.
+
+---
+
+### User Story 3 - Administrators manage users and roles (Priority: P2)
+
+An Administrator lists users, views one user, creates users, enables or disables accounts, and assigns or removes roles. Only the three fixed roles can be assigned. Managers and Operators cannot do any of this.
+
+**Why this priority**: Without administration, only the initial Administrator could ever exist. It depends on sign-in (P1) being in place.
+
+**Independent Test**: As Administrator, create a user, assign a role, disable then re-enable the account, and try to assign a role named outside the fixed set. Repeat the administrative calls as a Manager and an Operator.
+
+**Acceptance Scenarios**:
+
+1. **Given** an authenticated Administrator, **When** they create a user with a unique email, **Then** the user exists, is identifiable by a stable unique identifier, and can sign in once they have a usable password.
+2. **Given** an existing email, **When** an Administrator creates another user with the same email, **Then** the request is refused.
+3. **Given** an enabled user, **When** an Administrator disables them, **Then** the user can no longer obtain new authenticated access, and re-enabling restores it.
+4. **Given** a user, **When** an Administrator assigns or removes Administrator, Manager or Operator, **Then** the user's roles change accordingly and appear in tokens issued afterwards.
+5. **Given** a role name outside the three supported roles, **When** an Administrator attempts to assign it, **Then** the request is rejected and nothing changes.
+6. **Given** a Manager or Operator, **When** they attempt any user-administration operation, **Then** it is refused as forbidden.
+7. **Given** an Administrator, **When** they initiate an administrative password reset for a user, **Then** the user can set a new password and no one can ever read the old one.
+
+---
+
+### User Story 4 - Renew a session and sign out (Priority: P2)
+
+A signed-in user obtains a new short-lived access token without re-entering their password, using a renewal credential. Each successful renewal replaces the credential, and the old one stops working. Signing out revokes the session.
+
+**Why this priority**: Short-lived tokens are only usable if renewal exists; revocation limits the damage of stolen credentials.
+
+**Independent Test**: Sign in, renew once, then try to reuse the first renewal credential. Sign in again, sign out, then try to renew.
+
+**Acceptance Scenarios**:
+
+1. **Given** a valid renewal credential, **When** the user requests renewal, **Then** they receive a new access token and a new renewal credential.
+2. **Given** a renewal credential that has already been replaced, **When** it is presented again, **Then** the request is rejected.
+3. **Given** a user who signs out, **When** the revoked session's renewal credential is presented, **Then** it is rejected.
+4. **Given** a disabled user with a previously valid renewal credential, **When** they request renewal, **Then** it is refused.
+
+---
+
+### User Story 5 - View my own identity (Priority: P3)
+
+An authenticated user retrieves their own identifier, email and roles, so the frontend can personalize and gate its screens.
+
+**Why this priority**: Useful and simple, but the frontend can also read the token, so it is not blocking.
+
+**Independent Test**: Sign in and request the current identity; confirm it contains only identifier, email and roles.
+
+**Acceptance Scenarios**:
+
+1. **Given** an authenticated user, **When** they request their identity, **Then** the response contains their identifier, email and assigned roles and nothing sensitive.
+2. **Given** an unauthenticated caller, **When** they request an identity, **Then** the request is refused.
+
+---
+
+### User Story 6 - Establish the first Administrator on a clean install (Priority: P2)
+
+An operator who has just installed the service establishes the first Administrator through a documented, secure procedure. Once an Administrator exists, this procedure no longer allows creating further administrators.
+
+**Why this priority**: A clean installation has no users, so without this nothing can be administered.
+
+**Independent Test**: Start from an empty data store, follow the documented procedure, and sign in as the new Administrator. Then confirm the procedure cannot create another Administrator.
+
+**Acceptance Scenarios**:
+
+1. **Given** a clean installation with no users, **When** the operator follows the documented procedure with the required secret configuration, **Then** one Administrator is created and can sign in.
+2. **Given** an installation that already has an Administrator, **When** the procedure is run again, **Then** it does not create or elevate any account.
+3. **Given** the procedure's required configuration is missing or invalid in production, **When** the service starts, **Then** it fails clearly rather than falling back to an insecure default.
+
+---
+
+### User Story 7 - Integrate a new consumer API and operate the service (Priority: P2)
+
+A developer integrates a new consumer API using only the documentation. An operator or an agent with only Docker available can build, validate, migrate, run, back up and restore the service, and troubleshoot common sign-in failures.
+
+**Why this priority**: The service is meant to grow beyond its first two consumers and be operated without tribal knowledge.
+
+**Independent Test**: In an environment with only Docker, follow the documentation to build, test, migrate and run the service, then configure a sample consumer API for token validation and role authorization, without reading the service source.
+
+**Acceptance Scenarios**:
+
+1. **Given** only Docker, **When** a developer follows the documented commands, **Then** they can build, test, migrate and run the service.
+2. **Given** the integration documentation, **When** a developer configures a new consumer API, **Then** it validates tokens and enforces roles without access to the authentication data store, passwords or private signing material.
+3. **Given** a backup, **When** the documented restore procedure is followed, **Then** users, roles and state are recovered.
+
+---
+
+### User Story 8 - Read and try the API reference (Priority: P3)
+
+Developers read reference documentation for sign-in, renewal, sign-out, current identity, user administration, role assignment, token usage and authorization expectations. In development they can execute requests from it; in production it is read-only.
+
+**Why this priority**: Supports integration and adoption but does not affect runtime behavior.
+
+**Independent Test**: Open the documentation in a development environment and execute a sign-in; open it in production and confirm requests cannot be executed.
+
+**Acceptance Scenarios**:
+
+1. **Given** a development environment, **When** a developer opens the documentation, **Then** they can sign in and run authenticated requests from it.
+2. **Given** a production environment, **When** anyone opens the documentation, **Then** all operations are readable but none can be executed from it, and no secrets are shown.
+
+---
+
+### Edge Cases
+
+- Sign-in attempts with a malformed email, empty password or missing fields: refused with a validation error that reveals nothing about account existence.
+- Email comparison is case-insensitive, so `User@x.com` and `user@x.com` cannot both exist.
+- A user's roles or enabled state change while they hold a valid access token: the existing token remains valid until it expires, within the short token lifetime, and new tokens reflect the change.
+- An Administrator disables or removes the Administrator role from themselves, or from the last remaining enabled Administrator: refused, so the system is never left without an Administrator.
+- Presenting a previously replaced renewal credential is treated as possible theft; the session it belongs to is revoked.
+- Repeated failed sign-ins against one account or from one source are throttled.
+- A token-signing key rotation does not lock out users holding tokens signed by the previous key during the documented overlap window.
+- The service is restarted or redeployed: users, roles and sessions persist.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: The service MUST be the sole owner of user credentials, identity, account state and role assignments; consumer APIs MUST NOT hold passwords or password hashes.
+- **FR-002**: The service MUST support exactly three roles, Administrator, Manager and Operator, and MUST NOT allow any other role to be created or assigned through the public API.
+- **FR-003**: Users MUST be able to sign in with email and password; no separate username is required.
+- **FR-004**: Each user MUST have a stable unique identifier, a unique email, an enabled/disabled state and a set of roles.
+- **FR-005**: Failed sign-ins MUST return the same externally observable response (content and, as far as practical, timing) whether the email is unknown, the password is wrong or the account is disabled.
+- **FR-006**: Disabled users MUST NOT obtain new access tokens or renew sessions.
+- **FR-007**: Successful sign-in MUST return a signed, short-lived access token carrying the user identifier, roles, issuer, intended audience and validity period.
+- **FR-008**: Access tokens MUST be verifiable by consumer APIs using only public verification information; consumer APIs MUST NOT need private signing material, database access or a per-request call to the service.
+- **FR-009**: Private signing capability MUST be exclusive to the service and MUST NOT be exposed to consumer APIs, logs or documentation.
+- **FR-010**: The service MUST publish the public verification information, and support key rotation with an overlap window, in a way consumer APIs can consume as documented.
+- **FR-011**: Authenticated users MUST be able to retrieve their own identifier, email and roles, and the response MUST NOT include passwords, hashes, renewal credentials, internal authentication data or signing material.
+- **FR-012**: Administrators MUST be able to list users, retrieve a user, create users, enable and disable users, and assign and remove roles; Managers and Operators MUST be refused all of these operations.
+- **FR-013**: Administrator-only operations MUST be enforced by the service itself, never trusting role information supplied by the client.
+- **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password; Administrators MUST be able to initiate an administrative password reset without learning the old or new password.
+- **FR-015**: Passwords MUST never appear in responses or logs.
+- **FR-016**: A signed-in session MUST be renewable into a new access token and a new renewal credential without re-entering the password.
+- **FR-017**: Renewal credentials MUST be revocable; replacing one MUST invalidate the previous one, and reuse of an invalidated credential MUST be rejected.
+- **FR-018**: Signing out MUST revoke the corresponding session so its renewal credential can no longer be used.
+- **FR-019**: A clean installation MUST offer a documented, secure way to create the first Administrator, which MUST NOT be usable to create administrators once an Administrator exists.
+- **FR-020**: The service MUST NOT allow the last enabled Administrator to be disabled or stripped of the Administrator role.
+- **FR-021**: The service MUST throttle repeated failed sign-in attempts.
+- **FR-022**: Authentication-related errors MUST use a consistent, documented error format.
+- **FR-023**: The service MUST publish reference documentation covering sign-in, renewal, sign-out, current identity, user administration, role assignment, token usage and authorization expectations.
+- **FR-024**: In development the documentation MUST allow executing requests, including authenticated ones; in production it MUST be readable but MUST NOT allow executing requests or reveal secrets.
+- **FR-025**: User data MUST persist across restarts and be changed only through documented, non-destructive upgrade steps; startup MUST NOT delete or reset existing data.
+- **FR-026**: Production startup MUST fail clearly when mandatory security configuration (signing material, issuer, audience, initial Administrator settings where used) is missing or invalid.
+- **FR-027**: The repository MUST document starting, configuring, initializing, persisting, upgrading the data schema, integrating a consumer API, configuring role authorization, backup and restore, and troubleshooting common sign-in failures.
+- **FR-028**: Building, testing, migrating and running the service MUST be possible using only Docker, with no application technology stack installed locally.
+- **FR-029**: A deliberately small automated suite MUST verify critical authentication, authorization, token/session and persistence behavior; no coverage percentage is required.
+- **FR-030**: Adding another consumer API MUST require only documented configuration on the consumer side, with no change to how users authenticate.
+
+### Key Entities
+
+- **User**: A person who can sign in. Has a stable identifier, unique email, enabled state, assigned roles and a protected credential that is never readable.
+- **Role**: One of exactly Administrator, Manager, Operator. A fixed concept, not user-creatable.
+- **Access Token**: Short-lived signed proof of identity and roles. Carries user identifier, roles, issuer, audience and validity period.
+- **Renewal Credential / Session**: A revocable, single-use credential tied to a signed-in session, replaced on each renewal and revoked on sign-out or detected reuse.
+- **Signing Key Pair**: The private key held only by the service and the public verification information shared with consumer APIs.
+- **Consumer API**: An independent business API that trusts tokens from this service by validating them locally and authorizing by role.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: A valid enabled user can sign in with email and password and receive a usable access token in under 2 seconds under normal load.
+- **SC-002**: 100% of sign-in attempts with invalid credentials, unknown emails or disabled accounts are refused, and the refusals are indistinguishable to the caller.
+- **SC-003**: An independent consumer API configured with only public verification information accepts 100% of valid tokens and rejects 100% of expired, tampered, wrong-issuer or wrong-audience tokens, with no access to the authentication data store.
+- **SC-004**: In every tested case, Administrator-only operations accept Administrators and refuse Managers and Operators.
+- **SC-005**: Assigning any role outside Administrator, Manager and Operator is rejected in 100% of attempts.
+- **SC-006**: A replaced or signed-out renewal credential is rejected in 100% of reuse attempts, and a user can obtain a new access token through renewal without re-entering their password.
+- **SC-007**: A clean installation can have its first Administrator established by following the documentation in under 15 minutes, and the procedure cannot create further administrators afterwards.
+- **SC-008**: Production API documentation is fully readable and allows 0 requests to be executed from it.
+- **SC-009**: A person with only Docker can build, test, migrate and run the service by following the documentation, with no local installation of the application technology stack.
+- **SC-010**: A minimal automated suite covering sign-in, role enforcement, token validation, session renewal and persistence passes in the Docker environment.
+- **SC-011**: A developer can integrate a new consumer API using the documentation alone, without inspecting the service's implementation.
+- **SC-012**: After a restore from backup, 100% of users, roles and enabled states are recovered and sign-in works.
+
+## Assumptions
+
+- The initial deployment has two consumer APIs and one shared frontend; more consumer APIs are expected over time and are all operated within the same trust domain.
+- Self-registration, social/third-party sign-in, multi-factor authentication and email-delivered password recovery are out of scope; the only password reset is administrator-initiated.
+- Administrator-initiated reset delivers the user a way to set their own new password (for example a one-time reset credential handed over out of band); the exact delivery mechanism is a planning decision.
+- Access tokens are short-lived (on the order of minutes); renewal credentials last longer (on the order of days) and are single-use.
+- Role changes and account disablement reach consumer APIs when the current access token expires, not instantly; this lag is acceptable.
+- A user may hold more than one role.
+- Authentication data is stored on a single node with durable storage; high availability and horizontal scaling are out of scope for this feature.
+- The architecture, technology and testing constraints in the project constitution apply to the plan and implementation, not to this specification.
