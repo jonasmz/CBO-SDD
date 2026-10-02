@@ -49,7 +49,8 @@ Invariants enforced in the Application slices (using counts from the `IUserDirec
 | `FamilyId` (Guid) | Identifies the session; shared by all tokens produced by rotation |
 | `UserId` (Guid) | Owner |
 | `TokenHash` (string, unique index) | Base64 SHA-256 of the opaque token; the raw value is never stored |
-| `CreatedAt`, `ExpiresAt` (UTC) | `ExpiresAt` = created + 7 days (configurable) |
+| `CreatedAt`, `ExpiresAt` (UTC) | `ExpiresAt` = min(created + individual lifetime, `SessionExpiresAt`); individual lifetime 7 days by default (configurable) |
+| `SessionStartedAt`, `SessionExpiresAt` (UTC) | Set once at sign-in and copied unchanged to every token of the family on rotation; `SessionExpiresAt` = `SessionStartedAt` + absolute session lifetime (30 days by default, configurable) |
 | `State` | `Active`, `Rotated`, `Revoked` |
 | `ReplacedByTokenId` (Guid?) | Set on rotation |
 | `RevokedAt`, `RevokedReason` | `Logout`, `ReuseDetected`, `UserDisabled`, `PasswordReset` |
@@ -57,11 +58,12 @@ Invariants enforced in the Application slices (using counts from the `IUserDirec
 State transitions (implemented as methods on the Domain type, no framework dependency):
 
 ```text
-Active --Rotate(now)--> Rotated        (only if not expired; produces a new Active token, same family)
+Active --Rotate(now)--> Rotated        (only if the token and the session are not expired; produces a new Active
+                                        token, same family, same SessionExpiresAt, ExpiresAt capped at it)
 Active --Revoke(reason)--> Revoked
 Rotated --presented again--> family revoked (all tokens in FamilyId become Revoked: ReuseDetected)
 Revoked --presented--> rejected (family already revoked)
-Expired Active --presented--> rejected
+Expired Active (token or session) --presented--> rejected (user must sign in with credentials)
 ```
 
 Family-level operations: revoke by `FamilyId` (logout, reuse), revoke by `UserId` (disable, reset).
@@ -75,7 +77,7 @@ the security stamp. Depends on persisted Data Protection keys (`/data/keys`).
 ## Configuration entities (Options, not persisted)
 
 `JwtOptions` (issuer, audience, access-token minutes, signing key source, previous public keys),
-`SessionOptions` (refresh-token days), `BootstrapOptions` (admin email/password), `CorsOptions`,
+`SessionOptions` (refresh-token days, absolute session days; startup requires session days >= refresh-token days), `BootstrapOptions` (admin email/password), `CorsOptions`,
 `DatabaseOptions` (path, data-protection keys path, migrate-on-startup), `IdentityAccountOptions` (reset-code hours, lockout), `RateLimitOptions`.
 
 ## Indices and constraints (Infrastructure)

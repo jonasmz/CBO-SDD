@@ -24,8 +24,9 @@ Request: `{ "email": string, "password": string }`
 ### POST /api/auth/refresh
 Request: `{ "refreshToken": string }`
 - 200: same shape as login (new access token and new refresh token; the presented token is now invalid)
-- 401: unknown, expired, rotated, revoked token or disabled user. Presenting a rotated or revoked token
-  additionally revokes the whole session.
+- 401: unknown, expired (individual lifetime or session absolute lifetime), rotated, revoked token or disabled
+  user. Presenting a rotated or revoked token additionally revokes the whole session. A new refresh token
+  never expires later than its session's absolute expiration.
 
 ### POST /api/auth/logout
 Request: `{ "refreshToken": string }`
@@ -34,8 +35,9 @@ Request: `{ "refreshToken": string }`
 ### POST /api/auth/reset-password
 Request: `{ "email": string, "resetCode": string, "newPassword": string }`
 - 204: password changed, all sessions of the user revoked
-- 400: password does not meet the rule
-- 401: invalid, expired or already-used code, or unknown email (same response)
+- 400: password does not meet the rule (checked first, independent of code or account state)
+- 401: invalid, expired or already-used code, unknown email, or a disabled account (same response); a failed
+  attempt does not consume the code
 
 ## Current identity
 
@@ -52,7 +54,7 @@ Request: `{ "email": string, "resetCode": string, "newPassword": string }`
 | POST | `/api/users` | 201 `UserDto` + `Location`; 400 invalid email/password/roles (at least one supported role required); 409 email exists |
 | POST | `/api/users/{id}/enable` | 204 |
 | POST | `/api/users/{id}/disable` | 204; revokes all sessions; 409 if last enabled Administrator |
-| POST | `/api/users/{id}/password-reset` | 200 `{ "resetCode": string, "expiresAt": ISO-8601 }` shown once |
+| POST | `/api/users/{id}/password-reset` | 200 `{ "resetCode": string, "expiresAt": ISO-8601 }` shown once; allowed for a disabled account (the code cannot be redeemed while it stays disabled) |
 | PUT | `/api/users/{id}/roles/{role}` | 204 (idempotent); 400 unsupported role; 404 unknown user |
 | DELETE | `/api/users/{id}/roles/{role}` | 204; 400 unsupported role; 409 last role or last enabled Administrator |
 

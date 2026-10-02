@@ -30,6 +30,7 @@ No other claims (no `jti`, `nbf`, email, profile or password-related data). Cons
 
 - Fetch the JWKS at startup and refresh at most every 5 minutes, or immediately when a token carries an
   unknown `kid` (at most once per minute to avoid amplification).
+- On every refresh replace the cached key set with the published one (never merge), so a key removed by the service is dropped at the next refresh.
 - If the endpoint is unreachable, keep validating with the last fetched keys.
 - If no keys have ever been fetched, reject every token (fail closed).
 - A consumer using a static public key file needs no network access but must update it on rotation.
@@ -45,6 +46,22 @@ using a static key do not need network access to the auth service, but must upda
    `PreviousPublicKeys`. Restart the service.
 2. New tokens carry the new `kid`; consumers resolve keys by `kid` (JWKS) or have both keys configured.
 3. After at least one access-token lifetime plus skew, remove the old public key.
+
+## Emergency key replacement (suspected or confirmed compromise)
+
+Different from planned rotation: no overlap period.
+
+1. The compromised key stops signing: provision a new private key as `Current`, remove the compromised
+   public key from `PreviousPublicKeys` (do not keep it), and restart the service. New tokens carry the new
+   `kid`; existing refresh tokens and sessions keep working and receive access tokens signed by the new key.
+2. The key endpoint no longer lists the compromised key. Consumers using it adopt the new key on an unknown
+   `kid` and drop the old one at their next refresh (at most 5 minutes later).
+3. Consumers with static public keys must be updated manually or by deployment automation; until then they
+   may keep accepting tokens signed with the compromised key. This limitation MUST be stated in the
+   documentation.
+4. Trust in the old key outranks the validity of tokens already issued: once consumers hold the updated
+   material, treat every access token signed with the compromised key as untrusted. No revocation service or
+   introspection protocol is provided; refresh and session records are not destroyed automatically.
 
 ## Refresh token
 

@@ -10,6 +10,12 @@ and MUST be checked inside the dev container during implementation.
 - **Decision**: RS256 with an RSA key (2048-bit minimum) supplied through configuration. Two accepted
   sources: a PEM private key file path, or a PFX/X.509 certificate path plus password. Exactly one source
   must be configured. `kid` = base64url SHA-256 thumbprint of the public key.
+  Protection (spec FR-034): read-only mount into the service container; readable only by the runtime user
+  and the provisioning operator (owner operator, group = container runtime GID, mode 0640, directory
+  0750); never in an image or repository; a PFX password only through external secret configuration
+  (never a literal in a Dockerfile or Compose file, never logged); a missing or invalid PFX file or
+  password fails Production startup with a clear, secret-free message; PEM keys follow the same rules;
+  throwaway local validation keys are exempt.
 - **Rationale**: Clarification says X.509 is permitted but not required. RS256 is universally supported
   by consumer JWT libraries. Supporting both sources costs one small loader and avoids forcing
   certificate infrastructure on operators.
@@ -23,6 +29,12 @@ and MUST be checked inside the dev container during implementation.
   `GET /.well-known/jwks.json`. Consumers either fetch the JWKS or are given a static public key file.
   Rotation: add new key as Current, move the old public key to Previous, wait at least one access-token
   lifetime plus clock skew, then remove it.
+  Emergency replacement (spec FR-035) is different: the compromised public key is removed from
+  `PreviousPublicKeys` immediately (no overlap) together with a new `Current` key and a restart.
+  Consumers using the key endpoint replace their cached set on every refresh and adopt the new key on an
+  unknown `kid`; the removed key is dropped within 5 minutes. Static-key consumers keep accepting the old
+  key until updated by hand or automation (documented limitation). Trust in the old key outranks the
+  validity of already-issued access tokens; sessions are not destroyed automatically.
 - **Rationale**: Satisfies FR-010 and the "no source change" rotation requirement; a `kid` header lets
   consumers pick the right key during overlap.
 - **Alternatives**: full OIDC discovery document (out of scope: no OIDC).
@@ -38,7 +50,11 @@ and MUST be checked inside the dev container during implementation.
 ## R4. Refresh-token design
 
 - **Decision**: opaque 32-byte random value, base64url; stored as SHA-256 hash with `FamilyId`,
-  `ExpiresAt`, `State` (Active, Rotated, Revoked), `ReplacedByTokenId`. Rotation inside a transaction.
+  `ExpiresAt`, `SessionStartedAt`, `SessionExpiresAt`, `State` (Active, Rotated, Revoked),
+  `ReplacedByTokenId`. Individual lifetime 7 days (fresh on rotation); absolute session lifetime 30 days
+  from the original sign-in; a rotated token's `ExpiresAt` is capped at `SessionExpiresAt`, so a session
+  is sliding but bounded; defaults configurable, absolute must be >= individual, validated at startup
+  (individual 1 to 90 days, absolute 1 to 365 days). Rotation inside a transaction.
   Reuse of a non-Active token revokes every token in the family. Expired rows retained until a documented
   cleanup (manual SQL or later task).
 - **Rationale**: Matches clarified rules; hashing means a database leak does not yield usable tokens.
@@ -68,6 +84,10 @@ and MUST be checked inside the dev container during implementation.
   `Identity:ResetCodeHours` (default 24, allowed 1 to 72, `DataProtectionTokenProviderOptions`),
   single-use because the redemption changes the security stamp. Data Protection keys persist at
   `Database:DataProtectionKeysPath` (default `/data/keys`).
+- **Disabled accounts**: issuing a code for a disabled account is allowed; the ResetPassword handler
+  validates the password first (400), then checks the account state through `IUserDirectory` and answers a
+  disabled account with the same generic 401 as an invalid code without consuming the code. Re-enabling
+  does not sign the user in.
 - **Rationale**: Clarified rules, no email infrastructure, no custom crypto.
 - **Risk**: if the key ring is lost, outstanding reset codes become invalid; documented in operations.
 
@@ -94,7 +114,7 @@ and MUST be checked inside the dev container during implementation.
   Email uniqueness enforced by Identity (`RequireUniqueEmail`) plus a unique index on normalized email.
 - **Rationale**: Constitution VI and X; production image stays free of SDK tooling.
 - **Backup**: documented as stop service then copy the volume file, or SQLite online backup using
-  `sqlite3 .backup` in a throwaway container.
+  `sqlite3 .backup` through the repository-built `tools` service (never an ad-hoc public image).
 
 ## R9. OpenAPI and Scalar read-only production mode (**VERIFY**)
 
@@ -129,7 +149,8 @@ and MUST be checked inside the dev container during implementation.
 
 - **Decision**: options classes bound with `ValidateDataAnnotations` and custom validators,
   `ValidateOnStart`. Production requires: signing key configured and loadable, issuer, audience,
-  RSA key at least 2048 bits, CORS list parseable, and bootstrap password when the store is empty.
+  RSA key at least 2048 bits, a PFX file and password that load when a PFX is configured, session
+  lifetimes with absolute >= individual, CORS list parseable, and bootstrap password when the store is empty.
   `Database:MigrateOnStartup=true` is rejected outside Development. Startup logs the signing key
   identifier and, for certificates, the expiry date (spec FR-031); validity dates are not enforced.
   Development may auto-generate a throwaway RSA key under `/data/dev-keys`, never active when

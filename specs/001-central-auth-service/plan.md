@@ -8,7 +8,7 @@
 
 A standalone identity authority: email/password sign-in via ASP.NET Core Identity, short-lived
 RS256 JWT access tokens (15 min) carrying only `sub`, `role`, `iss`, `aud`, `iat`, `exp`, single-use rotating opaque
-refresh tokens (7 days, hashed at rest, family revocation on reuse), a fixed Administrator /
+refresh tokens (7 days each, 30-day absolute session cap, hashed at rest, family revocation on reuse), a fixed Administrator /
 Manager / Operator role set, Administrator-only user and role administration, startup bootstrap of
 the first Administrator, and Scalar-based API reference that is interactive only in Development.
 Hexagonal architecture with vertical slices on .NET 10 + EF Core + SQLite; everything is built,
@@ -179,7 +179,10 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
 - **Refresh tokens**: 32 random bytes, base64url; SHA-256 hash stored. A login creates a token family
   (session). Rotation marks the old token `Rotated` and issues a new one in the same family; reuse of a
   `Rotated` or `Revoked` token revokes the family. Logout revokes the presented token's family only.
-  Disable and password reset revoke all of the user's families.
+  Disable and password reset revoke all of the user's families. Each token has an individual lifetime
+  (default 7 days, fresh on every rotation) capped at the session's absolute expiration (default 30 days
+  from the original sign-in, never extended by rotation); both configurable and validated at startup
+  (`SessionOptions`, absolute >= individual).
 - **Bootstrap**: the Application slice `BootstrapAdministrator` decides: if the user count is zero and
   `Bootstrap__AdminEmail` / `Bootstrap__AdminPassword` are provided and satisfy `PasswordPolicy`, it
   asks `IUserCreator` to create the Administrator (user and role in one transaction); if any user exists
@@ -188,10 +191,22 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
 - **Password reset**: Identity password-reset token behind `IPasswordResetCodes` (data-protection based,
   lifespan `Identity:ResetCodeHours`, default 24, range 1 to 72, invalidated by the password change
   through the security stamp). Admin endpoint returns it once; user redeems it at a public endpoint.
-  Redemption validates the new password with `PasswordPolicy` and revokes all sessions.
+  Redemption validates the new password with `PasswordPolicy` (400 first), refuses a disabled account with
+  the same generic failure as an invalid code before consuming the code, and revokes all sessions.
+  Issuance for a disabled account is allowed.
 - **Password rule**: single source in Domain `PasswordPolicy`; Identity `PasswordOptions` mirror its
   constants as defense in depth. No lockout-based account-existence leak, because lockout failures
   return the same generic 401.
+- **Signing-key protection** (spec FR-034): production key or PFX is read-only mounted, readable only by
+  the runtime user and the provisioning operator (target: owner operator, group = container runtime GID,
+  mode 0640, directory 0750), never in an image or repository; a PFX password comes only from external
+  secret configuration (orchestrator secret or mounted secret via environment), never a literal in a
+  Dockerfile or Compose file; missing or invalid PFX credentials fail Production startup with a clear,
+  secret-free message. Local throwaway validation keys are exempt.
+- **Emergency key replacement** (spec FR-035): new `Current` key, compromised public key removed from the
+  published set with no overlap, restart; JWKS consumers drop it at their next refresh (replace, not
+  merge); static-key consumers need a manual or automated update and keep accepting the old key until then
+  (documented limitation); no revocation service or introspection.
 - **Throttling** (spec FR-021): Identity lockout 5 failures/15 minutes (reported as a fact by
   `ICredentialVerifier`, decided by the Login handler) plus a per-source fixed window of 10 requests per
   minute on login, refresh and reset-password; both configurable.
