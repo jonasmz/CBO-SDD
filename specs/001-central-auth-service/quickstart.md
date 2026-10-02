@@ -13,7 +13,7 @@ host-published ports and agent-side `curl` are never used. Contracts:
 - Repository checkout; `cp .env.example .env` and set `HOST_PROJECT_DIR` to the repository path **as seen
   by the host Docker daemon** (the same path when running on the host; when the agent runs in a
   container, see `docs/development.md` for how to find it), plus `Bootstrap__AdminEmail`,
-  `Bootstrap__AdminPassword` (meets the password rule) and, for production-mode steps, `SIGNING_KEY_DIR`
+  `Bootstrap__AdminPassword` (meets the password rule), `APP_UID`/`APP_GID` (production runtime identity; `.env` is the authoritative source and `.env.example` carries the defaults 10001/10001; independent of the development-only `LOCAL_UID`/`LOCAL_GID`, whose `.env.example` defaults are 1000/1000; the two sets must not be mixed) and, for production-mode steps, `SIGNING_KEY_DIR`
 
 For production-mode steps generate a throwaway validation key once (the same command as in `docs/deployment.md`; the file must be readable by the runtime user, so this is for local validation only):
 

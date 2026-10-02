@@ -28,10 +28,15 @@ No other claims (no `jti`, `nbf`, email, profile or password-related data). Cons
 
 ## Consumer key-retrieval behavior
 
-- Fetch the JWKS at startup and refresh at most every 5 minutes, or immediately when a token carries an
-  unknown `kid` (at most once per minute to avoid amplification).
-- On every refresh replace the cached key set with the published one (never merge), so a key removed by the service is dropped at the next refresh.
-- If the endpoint is unreachable, keep validating with the last fetched keys.
+- Fetch the JWKS at startup and cache it. The cached key set has a **maximum age of 5 minutes**: at 5 minutes
+  of age it is no longer fresh and MUST be re-fetched. Consumers SHOULD refresh earlier when useful.
+- A token with an unknown `kid` MAY trigger an immediate refresh, limited to at most one forced refresh per
+  minute per consumer process (no refresh storms); the token is rejected if the `kid` is still unknown.
+- A successful refresh REPLACES the cached key set (never merge, never retain removed keys). After it, a key
+  the service no longer publishes MUST NOT be accepted.
+- If a refresh attempt fails (endpoint unreachable), the consumer may keep validating with the last
+  successfully fetched set for as long as the outage lasts. The 5-minute maximum age does not guarantee that
+  a compromised key disappears while the endpoint is unreachable.
 - If no keys have ever been fetched, reject every token (fail closed).
 - A consumer using a static public key file needs no network access but must update it on rotation.
 
@@ -55,10 +60,14 @@ Different from planned rotation: no overlap period.
    public key from `PreviousPublicKeys` (do not keep it), and restart the service. New tokens carry the new
    `kid`; existing refresh tokens and sessions keep working and receive access tokens signed by the new key.
 2. The key endpoint no longer lists the compromised key. Consumers using it adopt the new key on an unknown
-   `kid` and drop the old one at their next refresh (at most 5 minutes later).
+   `kid` (forced refresh at most once per minute) and, because a cached set is at most 5 minutes old and a
+   successful refresh replaces it, stop accepting the old key within 5 minutes after the service stopped
+   publishing it, provided their refresh succeeds. This bound holds only while the consumer can retrieve the key set: during an endpoint outage a
+   consumer may keep using its last fetched set, including the compromised key. The system makes no claim of
+   immediate or bounded global invalidation while consumers cannot obtain the updated set.
 3. Consumers with static public keys must be updated manually or by deployment automation; until then they
-   may keep accepting tokens signed with the compromised key. This limitation MUST be stated in the
-   documentation.
+   may keep accepting tokens signed with the compromised key. Both limitations (static keys, key-endpoint
+   outage) MUST be stated in the documentation.
 4. Trust in the old key outranks the validity of tokens already issued: once consumers hold the updated
    material, treat every access token signed with the compromised key as untrusted. No revocation service or
    introspection protocol is provided; refresh and session records are not destroyed automatically.

@@ -91,7 +91,7 @@ specs/001-central-auth-service/
 Directory.Build.props            # nullable enable, analyzers, warnings-as-errors for security rules
 global.json                      # pins the .NET 10 SDK
 AuthService.slnx
-Dockerfile                       # multi-stage: sdk:10.0 build/publish -> aspnet:10.0 runtime
+Dockerfile                       # multi-stage: sdk:10.0 build/publish -> aspnet:10.0 runtime, non-root numeric APP_UID:APP_GID (fallback ARG defaults only)
 Dockerfile.dev                   # sdk:10.0 + dotnet-ef tool; /data writable for any UID
 Dockerfile.tools                 # pinned alpine + sqlite3, openssl, curl for validation/smoke steps
 compose.yaml                     # services: dev, dev-api, tools, auth-api, migrate;
@@ -198,15 +198,33 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
   constants as defense in depth. No lockout-based account-existence leak, because lockout failures
   return the same generic 401.
 - **Signing-key protection** (spec FR-034): production key or PFX is read-only mounted, readable only by
-  the runtime user and the provisioning operator (target: owner operator, group = container runtime GID,
-  mode 0640, directory 0750), never in an image or repository; a PFX password comes only from external
-  secret configuration (orchestrator secret or mounted secret via environment), never a literal in a
-  Dockerfile or Compose file; missing or invalid PFX credentials fail Production startup with a clear,
-  secret-free message. Local throwaway validation keys are exempt.
+  the runtime user and the provisioning operator, never in an image or repository. The runtime image runs as
+  a non-root user with an explicit numeric identity defined by the project; no image-default UID is
+  assumed. One operational source of truth: `APP_UID` and `APP_GID` in `.env` (documented defaults
+  10001 and 10001 in `.env.example`; deployment configuration plays the same role outside Compose).
+  `compose.yaml` passes them, without hard-coded fallbacks, to the image build arguments and to the
+  `user:` of `auth-api` and `migrate`; the Dockerfile keeps `ARG APP_UID=10001`/`APP_GID=10001` only as
+  safe fallbacks for direct `docker build` runs, and `docker image inspect` proves the image user equals
+  the configured values. `LOCAL_UID`/`LOCAL_GID` (default 1000 in `.env.example`; development containers and local validation
+  helpers only) are an independent identity set: never used for the production image, its `user:` or its
+  volume, and `APP_*` is never used for development containers; `.env` is authoritative and the `:-1000`
+  fallbacks in Compose are only safe defaults. Host
+  provisioning uses those numbers: owner operator, group = `APP_GID`, file mode 0640, directory mode 0750
+  (setting the group needs operator privileges). Fallback where numeric ids cannot be relied on (rootless
+  Docker, userns-remap, orchestrators): provision a runtime-readable secret through the deployment mechanism
+  (orchestrator secret) or inject an operator-owned 0600 secret into a container-visible location owned by
+  the runtime user before startup; never run the container as root to read the key. A PFX password comes
+  only from external secret configuration, never a literal in a Dockerfile or Compose file; missing or
+  invalid PFX credentials fail Production startup with a clear, secret-free message. Local throwaway
+  validation keys are exempt. Development containers use `LOCAL_UID`/`LOCAL_GID` on `authservice-dev-data`;
+  production uses `APP_UID`/`APP_GID` on `authservice-data`; the two never share a volume.
 - **Emergency key replacement** (spec FR-035): new `Current` key, compromised public key removed from the
-  published set with no overlap, restart; JWKS consumers drop it at their next refresh (replace, not
-  merge); static-key consumers need a manual or automated update and keep accepting the old key until then
-  (documented limitation); no revocation service or introspection.
+  published set with no overlap, restart. JWKS consumers cache the key set for at most 5 minutes, replace
+  (never merge) it on every successful refresh, and may force a refresh on an unknown `kid` at most once per
+  minute per process; the removed key is dropped within 5 minutes after the service stopped publishing it, provided their refresh succeeds. The
+  bound does not hold while a consumer cannot reach the key endpoint (it may keep its last fetched set), and
+  static-key consumers keep accepting the old key until updated; both limitations are documented; no
+  revocation service, introspection or per-request call.
 - **Throttling** (spec FR-021): Identity lockout 5 failures/15 minutes (reported as a fact by
   `ICredentialVerifier`, decided by the Login handler) plus a per-source fixed window of 10 requests per
   minute on login, refresh and reset-password; both configurable.

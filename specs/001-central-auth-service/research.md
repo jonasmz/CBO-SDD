@@ -11,8 +11,8 @@ and MUST be checked inside the dev container during implementation.
   sources: a PEM private key file path, or a PFX/X.509 certificate path plus password. Exactly one source
   must be configured. `kid` = base64url SHA-256 thumbprint of the public key.
   Protection (spec FR-034): read-only mount into the service container; readable only by the runtime user
-  and the provisioning operator (owner operator, group = container runtime GID, mode 0640, directory
-  0750); never in an image or repository; a PFX password only through external secret configuration
+  and the provisioning operator (owner operator, group = `APP_GID`, mode 0640, directory 0750, with the
+  explicit numeric identity of R12 and a documented fallback for rootless Docker or userns-remap); never in an image or repository; a PFX password only through external secret configuration
   (never a literal in a Dockerfile or Compose file, never logged); a missing or invalid PFX file or
   password fails Production startup with a clear, secret-free message; PEM keys follow the same rules;
   throwaway local validation keys are exempt.
@@ -31,9 +31,12 @@ and MUST be checked inside the dev container during implementation.
   lifetime plus clock skew, then remove it.
   Emergency replacement (spec FR-035) is different: the compromised public key is removed from
   `PreviousPublicKeys` immediately (no overlap) together with a new `Current` key and a restart.
-  Consumers using the key endpoint replace their cached set on every refresh and adopt the new key on an
-  unknown `kid`; the removed key is dropped within 5 minutes. Static-key consumers keep accepting the old
-  key until updated by hand or automation (documented limitation). Trust in the old key outranks the
+  Consumers using the key endpoint cache the set for at most 5 minutes, replace (never merge) it on every
+  successful refresh and adopt the new key on an unknown `kid` (forced refresh at most once per minute per
+  process); the removed key is dropped within 5 minutes after the service stopped publishing it, provided their refresh succeeds. That bound does
+  not hold while a consumer cannot reach the key endpoint (it may keep its last fetched set), and
+  static-key consumers keep accepting the old key until updated by hand or automation; both are documented
+  limitations. Trust in the old key outranks the
   validity of already-issued access tokens; sessions are not destroyed automatically.
 - **Rationale**: Satisfies FR-010 and the "no source change" rotation requirement; a `kid` header lets
   consumers pick the right key during overlap.
@@ -158,18 +161,26 @@ and MUST be checked inside the dev container during implementation.
 
 ## R12. Docker layout
 
-- **Decision**: `Dockerfile` multi-stage (`sdk:10.0` publish, `aspnet:10.0` run, non-root `app` user,
-  `/data` created and owned by that user before `VOLUME`, `HEALTHCHECK` through a `--healthcheck` switch
+- **Decision**: `Dockerfile` multi-stage (`sdk:10.0` publish, `aspnet:10.0` run, non-root numeric
+  user `APP_UID:APP_GID` (single source of truth: `.env` or deployment configuration, passed by Compose as build args and as `user:`; the Dockerfile `ARG` defaults of 10001 are only fallbacks for direct builds; the image-default `app` UID is not assumed),
+  empty `/data` created in the build stage and copied with `--chown` so no shell or user database is needed,
+  `USER` set numerically before `VOLUME`, `HEALTHCHECK` through a `--healthcheck` switch
   of the published app because the runtime image has no curl). `Dockerfile.dev` based on `sdk:10.0` with
   `dotnet-ef` installed, `/data` and `/nuget` world-writable so any `LOCAL_UID` can write to new named
   volumes, source bind-mounted from `${HOST_PROJECT_DIR:?}`. `Dockerfile.tools` is a pinned Alpine image
   with sqlite3, openssl and curl. Compose services: `dev` (tooling and tests), `dev-api` (runs the app
-  from source in Development, profile `run`), `tools`, `auth-api` (runtime image, Production default),
-  `migrate` (one-shot, same image and volume as `auth-api`). Volumes have explicit names:
+  from source in Development, profile `run`), `tools`, `auth-api` (runtime image, Production default, `user: "${APP_UID}:${APP_GID}"` without hard-coded fallbacks, and the same
+  build args), `migrate` (one-shot, same image, volume and `user:` as `auth-api`; it mounts neither the
+  signing key nor the PFX password). Volumes have explicit names:
   `authservice-dev-data` (dev, `dev-api`, `dev`), `authservice-data` (production), `nuget-cache`. Host
   published ports are only for humans (`DEV_API_PORT` default 8081, `API_PORT` default 8080) and differ
   so both can run. Key material is supplied through a read-only bind mount of `${SIGNING_KEY_DIR}` and
-  never copied into an image.
+  never copied into an image. Host provisioning of that file uses the same numeric ids (owner operator,
+  group `APP_GID`, mode 0640, directory 0750). Where host and container ids cannot be relied on (rootless
+  Docker, userns-remap) the fallback is a runtime-readable secret supplied by the deployment mechanism, or
+  an operator-owned 0600 secret copied into a container-visible location owned by the runtime user before
+  startup. Development containers use `LOCAL_UID:LOCAL_GID` (default 1000:1000 in `.env.example`; an independent identity set, never mixed with `APP_UID:APP_GID`; `.env` authoritative, Compose `:-1000` fallbacks only safe defaults) on a separate volume; local throwaway validation keys
+  (mode 0644) are exempt and only for `localhost` validation.
 - **Rationale**: Principles IX and X; the agent container reaches the service only through the compose
   network (see R14).
 
