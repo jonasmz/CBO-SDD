@@ -14,7 +14,7 @@ public sealed partial class SigningKeyProvider
     public string KeyId { get; }
     public IReadOnlyList<JsonWebKey> PublicKeys { get; }
 
-    public SigningKeyProvider(IOptions<JwtOptions> options, IHostEnvironment environment, ILogger<SigningKeyProvider> logger)
+    public SigningKeyProvider(IOptions<JwtOptions> options, IHostEnvironment environment, ILogger<SigningKeyProvider> logger, PersistedSigningKey persistedKey)
     {
         var configuration = options.Value;
         X509Certificate2? certificate = null;
@@ -26,15 +26,22 @@ public sealed partial class SigningKeyProvider
         else
         {
             var path = configuration.Signing.PrivateKeyPemPath;
-            if (string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(path) && !environment.IsDevelopment())
             {
-                if (!environment.IsDevelopment()) throw new InvalidOperationException("JWT signing key is required.");
-                path = "/data/dev-keys/signing.pem";
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                if (!File.Exists(path)) { using var generated = RSA.Create(2048); File.WriteAllText(path, generated.ExportRSAPrivateKeyPem()); }
+                // No explicit source: use the persisted key that startup already ensured (never generated lazily here).
+                privateKey = persistedKey.GetKey();
             }
-            privateKey = RSA.Create();
-            privateKey.ImportFromPem(File.ReadAllText(path));
+            else
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    path = "/data/dev-keys/signing.pem";
+                    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                    if (!File.Exists(path)) { using var generated = RSA.Create(2048); File.WriteAllText(path, generated.ExportRSAPrivateKeyPem()); }
+                }
+                privateKey = RSA.Create();
+                privateKey.ImportFromPem(File.ReadAllText(path));
+            }
         }
         if (privateKey.KeySize < 2048) throw new InvalidOperationException("JWT signing key must be at least 2048 bits.");
         KeyId = ComputeKeyId(privateKey);
@@ -47,7 +54,7 @@ public sealed partial class SigningKeyProvider
         certificate?.Dispose();
     }
 
-    private static string ComputeKeyId(RSA rsa) => Base64UrlEncoder.Encode(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()));
+    internal static string ComputeKeyId(RSA rsa) => Base64UrlEncoder.Encode(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()));
     private static JsonWebKey ToJwk(RSA rsa, string keyId)
     {
         var p = rsa.ExportParameters(false);

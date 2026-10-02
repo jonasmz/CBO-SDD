@@ -81,6 +81,7 @@ public static class DependencyInjection
         services.AddScoped<RefreshTokenStore>();
         services.AddScoped<IRefreshTokenStore>(provider => provider.GetRequiredService<RefreshTokenStore>());
         services.AddScoped<IUserSessionRevoker>(provider => provider.GetRequiredService<RefreshTokenStore>());
+        services.AddSingleton<PersistedSigningKey>();
         services.AddSingleton<SigningKeyProvider>();
         services.AddSingleton<JwksBuilder>();
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();

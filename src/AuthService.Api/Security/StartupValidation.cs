@@ -12,7 +12,15 @@ public sealed class JwtOptionsValidator(IHostEnvironment environment) : IValidat
         if (string.IsNullOrWhiteSpace(options.Issuer) || string.IsNullOrWhiteSpace(options.Audience)) return ValidateOptionsResult.Fail("JWT issuer and audience are required.");
         var pem = !string.IsNullOrWhiteSpace(options.Signing.PrivateKeyPemPath);
         var pfx = !string.IsNullOrWhiteSpace(options.Signing.CertificatePath);
-        if (!environment.IsDevelopment() && pem == pfx) return ValidateOptionsResult.Fail("Exactly one JWT signing source is required.");
+        if (!environment.IsDevelopment())
+        {
+            if (pem && pfx) return ValidateOptionsResult.Fail("Only one JWT signing source may be configured.");
+            var hasPassword = !string.IsNullOrEmpty(options.Signing.CertificatePassword);
+            if (pfx && !hasPassword) return ValidateOptionsResult.Fail("JWT signing certificate path requires a certificate password.");
+            if (!pfx && hasPassword) return ValidateOptionsResult.Fail("JWT signing certificate password requires a certificate path.");
+            // No explicit source: automatic persisted signing (validated when the key is ensured at startup).
+            if (!pem && !pfx) return ValidateOptionsResult.Success;
+        }
         if (environment.IsDevelopment() && !pem && !pfx) return ValidateOptionsResult.Success;
         try
         {
