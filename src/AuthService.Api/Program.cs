@@ -7,9 +7,14 @@ using AuthService.Infrastructure.Tokens;
 using AuthService.Api.Security;
 using AuthService.Api.Features.Authentication;
 using AuthService.Api.Features.Metadata;
+using AuthService.Api.Features.Identity;
+using AuthService.Api.Features.Users;
 using AuthService.Application.Features.Authentication.Login;
 using AuthService.Application.Features.Authentication.Logout;
 using AuthService.Application.Features.Authentication.RefreshToken;
+using AuthService.Application.Features.Authentication.ResetPassword;
+using AuthService.Application.Features.Identity.GetCurrentUser;
+using AuthService.Application.Features.Users;
 using AuthService.Infrastructure.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -30,6 +35,14 @@ builder.Services.AddAuthorizationPolicies();
 builder.Services.AddScoped<LoginHandler>();
 builder.Services.AddScoped<RefreshTokenHandler>();
 builder.Services.AddScoped<LogoutHandler>();
+builder.Services.AddScoped<ResetPasswordHandler>();
+builder.Services.AddScoped<GetCurrentUserHandler>();
+builder.Services.AddScoped<ListUsersHandler>();
+builder.Services.AddScoped<GetUserHandler>();
+builder.Services.AddScoped<CreateUserHandler>();
+builder.Services.AddScoped<SetUserEnabledHandler>();
+builder.Services.AddScoped<ChangeUserRoleHandler>();
+builder.Services.AddScoped<IssuePasswordResetHandler>();
 builder.Services.AddScoped<BootstrapAdministratorHandler>();
 builder.Services.AddHostedService<BootstrapHostedService>();
 
@@ -47,6 +60,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapAuthEndpoints();
 app.MapJwks();
+app.MapMe();
+app.MapUsers();
 app.Run();
 
 static void ValidateStartupOptions(IServiceProvider services)

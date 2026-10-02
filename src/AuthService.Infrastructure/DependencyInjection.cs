@@ -74,6 +74,9 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IUserDirectory, UserDirectory>();
         services.AddScoped<IUserCreator, UserCreator>();
+        services.AddScoped<IUserStateStore, UserStateStore>();
+        services.AddScoped<IUserRoleStore, UserRoleStore>();
+        services.AddScoped<IPasswordResetCodes, PasswordResetCodes>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<RefreshTokenStore>();
         services.AddScoped<IRefreshTokenStore>(provider => provider.GetRequiredService<RefreshTokenStore>());

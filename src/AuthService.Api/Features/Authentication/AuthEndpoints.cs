@@ -1,6 +1,7 @@
 using AuthService.Application.Features.Authentication.Login;
 using AuthService.Application.Features.Authentication.Logout;
 using AuthService.Application.Features.Authentication.RefreshToken;
+using AuthService.Application.Features.Authentication.ResetPassword;
 
 namespace AuthService.Api.Features.Authentication;
 
@@ -40,6 +41,16 @@ public static class AuthEndpoints
         {
             await handler.HandleAsync(request, cancellationToken);
             return Results.NoContent();
+        });
+        group.MapPost("/reset-password", async (ResetPasswordRequest request, ResetPasswordHandler handler, CancellationToken cancellationToken) =>
+        {
+            var outcome = await handler.HandleAsync(request, cancellationToken);
+            return outcome switch
+            {
+                ResetPasswordStatus.Succeeded => Results.NoContent(),
+                ResetPasswordStatus.ValidationFailure => Results.ValidationProblem(new Dictionary<string,string[]> { ["newPassword"] = ["Password does not meet the rule."] }),
+                _ => Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Invalid reset code")
+            };
         });
     }
 }
