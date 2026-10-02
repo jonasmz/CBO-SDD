@@ -20,6 +20,7 @@
 - Q: Must every user have at least one role, and can a user hold several? → A: Every user MUST have at least one role at all times; users MAY hold multiple roles simultaneously.
 - Q: What is the minimum administrative password reset workflow? → A: Administrator generates a single-use, time-limited reset code shown once to the Administrator and delivered to the user out of band; the user redeems it to set a new password. No email infrastructure.
 - Q: Does logout revoke only the current session or all sessions? → A: Only the current session. Disabling a user or completing a password reset revokes all of that user's sessions.
+- Q: What minimum rule must a new password meet? → A: At least 8 characters with at least one upper-case letter, one lower-case letter and one digit.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -189,7 +190,7 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - **FR-012**: Administrators MUST be able to list users, retrieve a user, create users, enable and disable users, and assign and remove roles; Managers and Operators MUST be refused all of these operations.
 - **FR-013**: Administrator-only operations MUST be enforced by the service itself, never trusting role information supplied by the client.
 - **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password. Administrators MUST be able to initiate a password reset that issues a single-use, time-limited reset code (shown once, 24 hours by default, configurable) which the user redeems to choose a new password; the Administrator never learns the old or new password. Completing a reset MUST revoke all of the user's sessions. No email delivery is required.
-- **FR-015**: Passwords MUST never appear in responses or logs.
+- **FR-015**: Passwords MUST never appear in responses or logs. Any password set by an Administrator at user creation or by a user redeeming a reset code MUST be at least 8 characters and contain at least one upper-case letter, one lower-case letter and one digit; otherwise the request MUST be rejected with a validation error.
 - **FR-016**: A signed-in session MUST be renewable using an opaque refresh token, yielding a new access token and a new refresh token without re-entering the password. Refresh tokens last 7 days by default (configurable) and MUST be stored only in non-recoverable form.
 - **FR-017**: Refresh tokens MUST be single-use: every successful renewal MUST invalidate the presented token. Presenting an already-replaced or revoked refresh token MUST be rejected and MUST revoke the entire session it belongs to.
 - **FR-018**: Signing out MUST revoke only the current session. Disabling a user MUST revoke all of that user's sessions.
