@@ -85,6 +85,7 @@ public static class DependencyInjection
         services.AddSingleton<JwksBuilder>();
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
         services.AddScoped<RoleSeeder>();
+        services.AddScoped<DatabaseInitializer>();
 
         return services;
     }

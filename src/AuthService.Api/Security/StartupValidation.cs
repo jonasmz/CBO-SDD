@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using AuthService.Infrastructure.Persistence;
 using AuthService.Infrastructure.Tokens;
 using Microsoft.Extensions.Options;
 
@@ -31,18 +30,11 @@ public sealed class JwtOptionsValidator(IHostEnvironment environment) : IValidat
     }
 }
 
-public sealed class DatabaseStartupValidator(IHostEnvironment environment) : IValidateOptions<DatabaseOptions>
-{
-    public ValidateOptionsResult Validate(string? name, DatabaseOptions options) => !environment.IsDevelopment() && options.MigrateOnStartup
-        ? ValidateOptionsResult.Fail("Database:MigrateOnStartup cannot be enabled outside Development.") : ValidateOptionsResult.Success;
-}
-
 public static class StartupValidation
 {
     public static IServiceCollection AddStartupValidation(this IServiceCollection services)
     {
         services.AddSingleton<IValidateOptions<JwtOptions>, JwtOptionsValidator>();
-        services.AddSingleton<IValidateOptions<DatabaseOptions>, DatabaseStartupValidator>();
         return services;
     }
 }

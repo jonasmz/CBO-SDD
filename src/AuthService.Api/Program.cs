@@ -115,43 +115,14 @@ static void ValidateStartupOptions(IServiceProvider services)
 static async Task ApplyMigrationsAndSeedAsync(IServiceProvider services)
 {
     await using var scope = services.CreateAsyncScope();
-    var database = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-    await database.Database.MigrateAsync();
-    await database.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=DELETE;");
-    await scope.ServiceProvider.GetRequiredService<RoleSeeder>().SeedAsync();
+    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync(migrate: true);
 }
 
 static async Task PrepareDatabaseAsync(IServiceProvider services)
 {
     await using var scope = services.CreateAsyncScope();
-    var database = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
     var options = scope.ServiceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-
-    if (options.MigrateOnStartup)
-    {
-        await database.Database.MigrateAsync();
-        await database.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=DELETE;");
-    }
-    else
-    {
-        try
-        {
-            if (!await database.Database.CanConnectAsync() || (await database.Database.GetPendingMigrationsAsync()).Any())
-            {
-                throw new InvalidOperationException("Database schema is not up to date; run the migrate service");
-            }
-        }
-        catch (InvalidOperationException exception) when (exception.Message == "Database schema is not up to date; run the migrate service")
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            throw new InvalidOperationException("Database schema is not up to date; run the migrate service", exception);
-        }
-    }
-
-    await scope.ServiceProvider.GetRequiredService<RoleSeeder>().SeedAsync();
+    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync(options.MigrateOnStartup);
 }
 
 public partial class Program;
