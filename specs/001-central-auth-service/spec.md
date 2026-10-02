@@ -22,6 +22,15 @@
 - Q: Does logout revoke only the current session or all sessions? → A: Only the current session. Disabling a user or completing a password reset revokes all of that user's sessions.
 - Q: What minimum rule must a new password meet? → A: At least 8 characters with at least one upper-case letter, one lower-case letter and one digit.
 
+### Session 2026-10-02 (analysis remediation)
+
+- Q: Which sign-in throttle limits apply? → A: Per account, 5 consecutive failures refuse further attempts on that account for 15 minutes; per source address, at most 10 requests per minute to sign-in, renewal and reset-redemption endpoints (excess gets 429). All values configurable.
+- Q: Which claims does an access token carry? → A: `sub`, `role`, `iss`, `aud`, `iat`, `exp` only.
+- Q: What must the service log about security events? → A: Failed sign-ins (without the email or password), refresh-token reuse detection, user enable/disable, role assignment/removal, password-reset issuance and redemption, bootstrap outcome, and at startup the signing key identifier and, for certificates, the expiry date. Never secrets.
+- Q: What happens when the signing certificate expires? → A: The service does not enforce certificate validity dates (it uses the key); the expiry date is logged at startup and operators must rotate before expiry as documented.
+- Q: Who provides transport security, and how far is an Administrator trusted in a password reset? → A: TLS is terminated by the deployment (a reverse proxy); the service listens on plain HTTP behind it and the documentation forbids exposing it directly to untrusted networks. An Administrator who issues a reset code can set that user's password, so Administrators are trusted accounts.
+- Q: What must a consumer API do when it cannot reach the key endpoint? → A: Keep validating with the last keys it fetched; with no keys ever fetched, reject all tokens. Consumers refresh keys at most every 5 minutes or on an unknown key identifier.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Sign in and call a consumer API (Priority: P1)
@@ -82,11 +91,11 @@ An Administrator lists users, views one user, creates users, enables or disables
 
 ### User Story 4 - Renew a session and sign out (Priority: P2)
 
-A signed-in user obtains a new short-lived access token without re-entering their password, using a renewal credential. Each successful renewal replaces the credential, and the old one stops working. Signing out revokes the session.
+A signed-in user obtains a new short-lived access token without re-entering their password, using a refresh token. Each successful renewal replaces the refresh token, and the old one stops working. Signing out revokes the session.
 
 **Why this priority**: Short-lived tokens are only usable if renewal exists; revocation limits the damage of stolen credentials.
 
-**Independent Test**: Sign in, renew once, then try to reuse the first renewal credential. Sign in again, sign out, then try to renew.
+**Independent Test**: Sign in, renew once, then try to reuse the first refresh token. Sign in again, sign out, then try to renew.
 
 **Acceptance Scenarios**:
 
@@ -165,10 +174,10 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - Sign-in attempts with a malformed email, empty password or missing fields: refused with a validation error that reveals nothing about account existence.
 - Email comparison is case-insensitive, so `User@x.com` and `user@x.com` cannot both exist.
 - A user's roles or enabled state change while they hold a valid access token: the existing token remains valid until it expires, within the short token lifetime, and new tokens reflect the change.
-- An Administrator disables or removes the Administrator role from themselves, or from the last remaining enabled Administrator: refused, so the system is never left without an Administrator.
+- Changes that would leave no enabled Administrator, or a user with no role: refused (FR-020).
 - Presenting a previously replaced refresh token is treated as possible theft; the session it belongs to is revoked.
 - A reset code that is expired, already used or never issued is rejected without revealing which.
-- Repeated failed sign-ins against one account or from one source are throttled.
+- Repeated failed sign-ins: throttled as defined in FR-021.
 - A token-signing key rotation does not lock out users holding tokens signed by the previous key during the documented overlap window.
 - The service is restarted or redeployed: users, roles and sessions persist.
 
@@ -180,23 +189,23 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - **FR-002**: The service MUST support exactly three roles, Administrator, Manager and Operator, and MUST NOT allow any other role to be created or assigned through the public API.
 - **FR-003**: Users MUST be able to sign in with email and password; no separate username is required.
 - **FR-004**: Each user MUST have a stable unique identifier, a unique email, an enabled/disabled state and a set of roles. A user MUST always hold at least one role, MAY hold several, and user creation MUST require at least one role.
-- **FR-005**: Failed sign-ins MUST return the same externally observable response (content and, as far as practical, timing) whether the email is unknown, the password is wrong or the account is disabled.
+- **FR-005**: Failed sign-ins MUST return an identical status code and response body whether the email is unknown, the password is wrong, the account is disabled or the account is temporarily refused (FR-021). For an unknown email the service MUST still perform password-verification work so processing time does not reveal existence; no tighter timing guarantee is made.
 - **FR-006**: Disabled users MUST NOT obtain new access tokens or renew sessions.
-- **FR-007**: Successful sign-in MUST return a signed access token carrying the user identifier, roles, issuer, intended audience and validity period. The default lifetime is 15 minutes and MUST be configurable.
+- **FR-007**: Successful sign-in MUST return a signed access token carrying exactly the user identifier (`sub`), roles (`role`), issuer (`iss`), intended audience (`aud`), issue time (`iat`) and expiry (`exp`), and no other claims. The default lifetime is 15 minutes and MUST be configurable (1 to 60 minutes).
 - **FR-008**: Access tokens MUST be verifiable by consumer APIs using only public verification information; consumer APIs MUST NOT need private signing material, database access or a per-request call to the service.
 - **FR-009**: Tokens MUST be signed with an asymmetric key pair supplied to the service through external configuration (a certificate is permitted but not required). Private signing capability MUST be exclusive to the service and MUST NOT be exposed to consumer APIs, logs or documentation; consumer APIs MUST receive public verification material only.
-- **FR-010**: The service MUST publish the public verification information, and support key rotation with an overlap window, in a way consumer APIs can consume as documented.
-- **FR-011**: Authenticated users MUST be able to retrieve their own identifier, email and roles, and the response MUST NOT include passwords, hashes, renewal credentials, internal authentication data or signing material.
+- **FR-010**: The service MUST publish the public verification information, identified by a key identifier, and support key rotation with an overlap window, in a way consumer APIs can consume as documented. The service does not enforce certificate validity dates; it logs the expiry date at startup (FR-031). Consumer behavior when the key endpoint is unreachable is as clarified (keep last fetched keys; fail closed if none).
+- **FR-011**: Authenticated users MUST be able to retrieve their own identifier, email and roles, and the response MUST NOT include passwords, hashes, refresh tokens, internal authentication data or signing material.
 - **FR-012**: Administrators MUST be able to list users, retrieve a user, create users, enable and disable users, and assign and remove roles; Managers and Operators MUST be refused all of these operations.
 - **FR-013**: Administrator-only operations MUST be enforced by the service itself, never trusting role information supplied by the client.
-- **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password. Administrators MUST be able to initiate a password reset that issues a single-use, time-limited reset code (shown once, 24 hours by default, configurable) which the user redeems to choose a new password; the Administrator never learns the old or new password. Completing a reset MUST revoke all of the user's sessions. No email delivery is required.
+- **FR-014**: No user, Administrator or consumer API MUST be able to retrieve an existing password. Administrators MUST be able to initiate a password reset that issues a single-use, time-limited reset code (shown once, 24 hours by default, configurable between 1 and 72 hours) which the user redeems to choose a new password; the Administrator never learns the old or new password. Completing a reset MUST revoke all of the user's sessions. No email delivery is required.
 - **FR-015**: Passwords MUST never appear in responses or logs. Any password set by an Administrator at user creation or by a user redeeming a reset code MUST be at least 8 characters and contain at least one upper-case letter, one lower-case letter and one digit; otherwise the request MUST be rejected with a validation error.
 - **FR-016**: A signed-in session MUST be renewable using an opaque refresh token, yielding a new access token and a new refresh token without re-entering the password. Refresh tokens last 7 days by default (configurable) and MUST be stored only in non-recoverable form.
 - **FR-017**: Refresh tokens MUST be single-use: every successful renewal MUST invalidate the presented token. Presenting an already-replaced or revoked refresh token MUST be rejected and MUST revoke the entire session it belongs to.
 - **FR-018**: Signing out MUST revoke only the current session. Disabling a user MUST revoke all of that user's sessions.
 - **FR-019**: A clean installation MUST create the first Administrator from externally supplied configuration (initial email and password) at startup, only when the store contains no users. Once any user exists, this mechanism MUST create or modify nothing and its configuration MUST be ignored. Production MUST fail clearly if the initial password is missing when the store is empty, and the documentation MUST advise removing it after first start.
 - **FR-020**: The service MUST NOT allow the last enabled Administrator to be disabled or stripped of the Administrator role, and MUST NOT allow a user's last remaining role to be removed.
-- **FR-021**: The service MUST throttle repeated failed sign-in attempts.
+- **FR-021**: The service MUST throttle repeated failed sign-in attempts: after 5 consecutive failures for an account, further attempts on that account are refused for 15 minutes with the same generic failure as FR-005; and each source address is limited to 10 requests per minute on the sign-in, renewal and reset-redemption endpoints, with excess requests receiving 429. All limits MUST be configurable.
 - **FR-022**: Authentication-related errors MUST use a consistent, documented error format.
 - **FR-023**: The service MUST publish reference documentation covering sign-in, renewal, sign-out, current identity, user administration, role assignment, token usage and authorization expectations.
 - **FR-024**: In development the documentation MUST allow executing requests, including authenticated ones; in production it MUST be readable but MUST NOT allow executing requests or reveal secrets.
@@ -206,13 +215,14 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - **FR-028**: Building, testing, migrating and running the service MUST be possible using only Docker, with no application technology stack installed locally.
 - **FR-029**: A deliberately small automated suite MUST verify critical authentication, authorization, token/session and persistence behavior; no coverage percentage is required.
 - **FR-030**: Adding another consumer API MUST require only documented configuration on the consumer side, with no change to how users authenticate.
+- **FR-031**: The service MUST log security events without secrets: failed sign-ins (no email, no password), refresh-token reuse detection, user enable/disable, role assignment/removal, password-reset issuance and redemption, bootstrap outcome, and at startup the signing key identifier and certificate expiry date when a certificate is used. Passwords, access tokens, refresh tokens, reset codes and key material MUST never be logged.
 
 ### Key Entities
 
 - **User**: A person who can sign in. Has a stable identifier, unique email, enabled state, assigned roles and a protected credential that is never readable.
 - **Role**: One of exactly Administrator, Manager, Operator. A fixed concept, not user-creatable.
-- **Access Token**: Short-lived signed proof of identity and roles. Carries user identifier, roles, issuer, audience and validity period.
-- **Renewal Credential / Session**: A revocable, single-use credential tied to a signed-in session, replaced on each renewal and revoked on sign-out or detected reuse.
+- **Access Token**: Short-lived signed proof of identity and roles. Carries user identifier, roles, issuer, audience, issue time and expiry.
+- **Refresh Token / Session**: A revocable, single-use credential tied to a signed-in session, replaced on each renewal and revoked on sign-out or detected reuse.
 - **Signing Key Pair**: The private key held only by the service and the public verification information shared with consumer APIs.
 - **Consumer API**: An independent business API that trusts tokens from this service by validating them locally and authorizing by role.
 
@@ -221,11 +231,11 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 ### Measurable Outcomes
 
 - **SC-001**: A valid enabled user can sign in with email and password and receive a usable access token in under 2 seconds under normal load.
-- **SC-002**: 100% of sign-in attempts with invalid credentials, unknown emails or disabled accounts are refused, and the refusals are indistinguishable to the caller.
+- **SC-002**: 100% of sign-in attempts with invalid credentials, unknown emails or disabled accounts are refused, with identical status code and body (FR-005).
 - **SC-003**: An independent consumer API configured with only public verification information accepts 100% of valid tokens and rejects 100% of expired, tampered, wrong-issuer or wrong-audience tokens, with no access to the authentication data store.
 - **SC-004**: In every tested case, Administrator-only operations accept Administrators and refuse Managers and Operators.
 - **SC-005**: Assigning any role outside Administrator, Manager and Operator is rejected in 100% of attempts.
-- **SC-006**: A replaced or signed-out renewal credential is rejected in 100% of reuse attempts, and a user can obtain a new access token through renewal without re-entering their password.
+- **SC-006**: A replaced or signed-out refresh token is rejected in 100% of reuse attempts, and a user can obtain a new access token through renewal without re-entering their password.
 - **SC-007**: A clean installation can have its first Administrator established by following the documentation in under 15 minutes, and the procedure cannot create further administrators afterwards.
 - **SC-008**: Production API documentation is fully readable and allows 0 requests to be executed from it.
 - **SC-009**: A person with only Docker can build, test, migrate and run the service by following the documentation, with no local installation of the application technology stack.
@@ -240,4 +250,6 @@ Developers read reference documentation for sign-in, renewal, sign-out, current 
 - Role changes and account disablement reach consumer APIs when the current access token expires, not instantly; this lag is acceptable.
 - OAuth/OIDC, federation and external identity providers are out of scope; the service issues its own tokens only.
 - Authentication data is stored on a single node with durable storage; high availability and horizontal scaling are out of scope for this feature.
+- Production traffic reaches the service through a TLS-terminating reverse proxy; the service itself speaks HTTP behind it.
+- Administrators are trusted accounts; an Administrator who issues a reset code can take over that user's account.
 - The architecture, technology and testing constraints in the project constitution apply to the plan and implementation, not to this specification.

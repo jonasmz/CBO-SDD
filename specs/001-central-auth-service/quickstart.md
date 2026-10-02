@@ -1,15 +1,25 @@
 # Quickstart: Validate the Central Authentication Service
 
 All commands run on the host with Docker only. No .NET is installed locally and none is installed in
-the agent container. Contracts: [http-api.md](contracts/http-api.md),
-[token-and-jwks.md](contracts/token-and-jwks.md). Entities: [data-model.md](data-model.md).
+the agent container. When the agent itself runs in a container, every HTTP check and database
+inspection goes through the repository-built `tools` container on the compose network (research R14);
+host-published ports and agent-side `curl` are never used. Contracts:
+[http-api.md](contracts/http-api.md), [token-and-jwks.md](contracts/token-and-jwks.md). Entities:
+[data-model.md](data-model.md).
 
 ## Prerequisites
 
 - Docker with Compose v2
-- Repository checkout; `cp .env.example .env` and set `Bootstrap__AdminEmail`,
-  `Bootstrap__AdminPassword` (meets the password rule) and the signing key location (development can
-  auto-generate a key)
+- Repository checkout; `cp .env.example .env` and set `HOST_PROJECT_DIR` to the repository path **as seen
+  by the host Docker daemon** (the same path when running on the host; when the agent runs in a
+  container, see `docs/development.md` for how to find it), plus `Bootstrap__AdminEmail`,
+  `Bootstrap__AdminPassword` (meets the password rule) and, for production-mode steps, `SIGNING_KEY_DIR`
+
+Shorthand used below:
+
+```bash
+tools() { docker compose run --rm -T tools "$@"; }   # curl, sqlite3, openssl live here
+```
 
 ## 1. Build and test in the dev container
 
@@ -30,29 +40,29 @@ docker compose run --rm dev dotnet ef migrations add <Name> \
 docker compose run --rm migrate
 ```
 Expected: migration files appear under `src/AuthService.Infrastructure/Persistence/Migrations`; the
-`migrate` service applies them to the volume database and exits 0.
+`migrate` service applies migrations, seeds the three roles and exits 0.
 
 ## 3. Run the service
 
 ```bash
 docker compose up -d auth-api
-curl -s localhost:8080/health          # Healthy
+tools sh -c 'until curl -sf http://auth-api:8080/health; do sleep 2; done'   # Healthy
 ```
 Expected: first start with an empty database creates the bootstrap Administrator (log line
-`Bootstrap administrator created`).
+`Bootstrap administrator created`). For Development runs use `docker compose --profile run up -d dev-api`
+and `http://dev-api:8080`.
 
-## 4. Smoke scenarios
+## 4. Smoke scenarios (replace `<base>` with `http://auth-api:8080`)
 
 ```bash
-# sign in as the bootstrap administrator
-curl -s -X POST localhost:8080/api/auth/login -H 'content-type: application/json' \
+tools curl -s -X POST <base>/api/auth/login -H 'content-type: application/json' \
   -d '{"email":"<admin email>","password":"<admin password>"}'
-# use the accessToken
-curl -s localhost:8080/api/me -H "authorization: Bearer <accessToken>"
+tools curl -s <base>/api/me -H "authorization: Bearer <accessToken>"
 # create a Manager, then confirm the Manager gets 403 on GET /api/users
 # rotate: POST /api/auth/refresh with the refreshToken; reuse the old one -> 401 and session revoked
 # logout: POST /api/auth/logout with the refreshToken; refresh again -> 401
 # unsupported role: PUT /api/users/{id}/roles/Root -> 400
+# time the login request: expect well under 2 seconds (SC-001)
 ```
 
 ## 5. Bootstrap is closed
@@ -63,22 +73,22 @@ is created. `GET /api/users` as the Administrator still lists the same users.
 ## 6. Persistence survives container replacement
 
 ```bash
-docker compose down            # keeps the volume
+docker compose down            # keeps the named volume
 docker compose up -d auth-api
 # sign in again with the same credentials: succeeds
 ```
 
 ## 7. Independent token validation
 
-Fetch `localhost:8080/.well-known/jwks.json`, configure a sample consumer (see
+Fetch `<base>/.well-known/jwks.json`, configure a sample consumer (see
 `docs/jwt-consumer-integration.md`) with only that public key, and confirm: valid token accepted;
 expired, tampered, wrong-issuer and wrong-audience tokens rejected; Administrator-only endpoint rejects a
 Manager and Operator token.
 
 ## 8. Documentation modes
 
-- Development (`ASPNETCORE_ENVIRONMENT=Development`): open `/scalar`, sign in, execute a request from the
-  page.
-- Production (`ASPNETCORE_ENVIRONMENT=Production`, valid signing configuration): `/scalar` renders, no
-  request can be executed from it. Starting Production with the signing key missing exits with a clear
-  configuration error.
+- Development (`ASPNETCORE_ENVIRONMENT=Development`, service `dev-api`): `/scalar` renders and requests
+  can be executed from it with a bearer token.
+- Production (`ASPNETCORE_ENVIRONMENT=Production`, valid signing configuration): `/scalar` renders; the
+  page has no send/execute control, no server URL and no credential input (SC-008). Starting Production
+  with the signing key missing exits with a clear configuration error.

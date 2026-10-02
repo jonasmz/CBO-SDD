@@ -10,10 +10,9 @@ Header: `{ "alg": "RS256", "typ": "JWT", "kid": "<key id>" }`
 | `role` | one claim per role: `Administrator`, `Manager`, `Operator` (JSON array when several) |
 | `iss` | configured issuer string |
 | `aud` | configured audience string shared by consumer APIs |
-| `iat`, `nbf`, `exp` | issue, not-before, expiry (default lifetime 15 minutes) |
-| `jti` | unique token id |
+| `iat`, `exp` | issue time and expiry (default lifetime 15 minutes) |
 
-No email, no profile data, no password-related data. Consumer validation MUST check signature, `iss`,
+No other claims (no `jti`, `nbf`, email, profile or password-related data). Consumer validation MUST check signature, `iss`,
 `aud`, and lifetime (clock skew at most 1 minute), with `NameClaimType = "sub"`,
 `RoleClaimType = "role"`, and inbound claim mapping disabled.
 
@@ -26,6 +25,14 @@ No email, no profile data, no password-related data. Consumer validation MUST ch
 - Contains the current signing key's public part and every configured previous public key.
 - Never contains private parameters (`d`, `p`, `q`, `dp`, `dq`, `qi`).
 - `Cache-Control: public, max-age=300`.
+
+## Consumer key-retrieval behavior
+
+- Fetch the JWKS at startup and refresh at most every 5 minutes, or immediately when a token carries an
+  unknown `kid` (at most once per minute to avoid amplification).
+- If the endpoint is unreachable, keep validating with the last fetched keys.
+- If no keys have ever been fetched, reject every token (fail closed).
+- A consumer using a static public key file needs no network access but must update it on rotation.
 
 ## Alternative distribution
 

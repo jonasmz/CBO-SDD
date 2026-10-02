@@ -21,7 +21,11 @@ reused for administrative disable, so lockout and disable stay independent.
 Rules:
 - Email unique; creation with duplicate email is rejected (409).
 - At least one role at all times; creation requires one or more roles (FR-004).
-- Password rule applies on creation and reset: 8+ characters, upper, lower, digit (FR-015).
+- Password rule applies on creation, reset and bootstrap: 8+ characters, upper, lower, digit (FR-015). It is
+  defined once in Domain `PasswordPolicy` (real domain behavior: validates a candidate password and
+  returns the violated rules, never the password); Identity options mirror it.
+- Disabled or locked-out users fail sign-in; this decision is made by the Login handler from facts
+  reported by the credential verifier, not by the adapter.
 
 ## Role (Identity `IdentityRole<Guid>`; names from Domain `AppRoles`)
 
@@ -33,7 +37,7 @@ parameter and request is validated through it. No API creates, renames or delete
 
 Many-to-many; a user may hold several roles.
 
-Invariants enforced in the Application slices (using counts from the `IUserAccounts` port):
+Invariants enforced in the Application slices (using counts from the `IUserDirectory` port):
 - RemoveRole refuses removal of a user's last role.
 - RemoveRole and DisableUser refuse changes that would leave zero enabled Administrators.
 
@@ -72,7 +76,7 @@ the security stamp. Depends on persisted Data Protection keys (`/data/keys`).
 
 `JwtOptions` (issuer, audience, access-token minutes, signing key source, previous public keys),
 `SessionOptions` (refresh-token days), `BootstrapOptions` (admin email/password), `CorsOptions`,
-`DatabaseOptions` (path, migrate-on-startup), `RateLimitOptions`.
+`DatabaseOptions` (path, data-protection keys path, migrate-on-startup), `IdentityAccountOptions` (reset-code hours, lockout), `RateLimitOptions`.
 
 ## Indices and constraints (Infrastructure)
 

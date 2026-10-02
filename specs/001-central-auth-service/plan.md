@@ -7,7 +7,7 @@
 ## Summary
 
 A standalone identity authority: email/password sign-in via ASP.NET Core Identity, short-lived
-RS256 JWT access tokens (15 min) carrying `sub` and `role` claims, single-use rotating opaque
+RS256 JWT access tokens (15 min) carrying only `sub`, `role`, `iss`, `aud`, `iat`, `exp`, single-use rotating opaque
 refresh tokens (7 days, hashed at rest, family revocation on reuse), a fixed Administrator /
 Manager / Operator role set, Administrator-only user and role administration, startup bootstrap of
 the first Administrator, and Scalar-based API reference that is interactive only in Development.
@@ -23,8 +23,10 @@ rationale are in [research.md](research.md).
 `Microsoft.AspNetCore.Authentication.JwtBearer`, `Microsoft.AspNetCore.OpenApi`, `Scalar.AspNetCore`,
 `System.IdentityModel.Tokens.Jwt` / `Microsoft.IdentityModel.JsonWebTokens` (Infrastructure only)
 
-**Storage**: SQLite file `/data/auth.db` on a named Docker volume; ASP.NET Data Protection keys on the
-same volume (`/data/keys`) so reset codes survive container replacement
+**Storage**: SQLite file `/data/auth.db` on a named Docker volume (`authservice-data` in production,
+separate `authservice-dev-data` for development tooling); ASP.NET Data Protection keys on the same
+volume (`/data/keys`, option `Database:DataProtectionKeysPath`) so reset codes survive container
+replacement
 
 **Testing**: xUnit; `Microsoft.AspNetCore.Mvc.Testing` integration tests against real SQLite; a few
 `NetArchTest.Rules` boundary checks. No coverage target (Constitution XI)
@@ -47,17 +49,17 @@ for single node)
 
 | Principle | Status | How the plan satisfies it |
 |---|---|---|
-| I. Hexagonal + Vertical Slices | PASS | Four projects with inward references; features under `Application/Features/*`; endpoint mapping per feature in Api; boundaries enforced by architecture tests |
-| II. Simple, explicit design | PASS | No MediatR, generic repository, UoW, event bus. Slice handlers are plain classes. Ports exist only where a handler needs them (see Structure Decision) |
-| III. Centralized authentication | PASS | Identity `PasswordHasher` and `SignInManager`-style checks; uniform generic failure; dummy hash work for unknown email |
+| I. Hexagonal + Vertical Slices | PASS | Four projects with inward references; features under `Application/Features/*`; endpoint mapping per feature in Api; boundaries enforced by architecture tests. Business decisions (disabled/locked users fail, bootstrap only on empty store, duplicate email, password rule, last-admin/last-role guards) live in Domain or Application; adapters return facts and perform mechanics only |
+| II. Simple, explicit design | PASS | No MediatR, generic repository, UoW, event bus. Slice handlers are plain classes. Narrow, role-specific ports (interface segregation): `ICredentialVerifier`, `IUserDirectory`, `IUserCreator`, `IUserStateStore`, `IUserRoleStore`, `IPasswordResetCodes`, `IAccessTokenIssuer`, `IRefreshTokenStore`, `IUserSessionRevoker` |
+| III. Centralized authentication | PASS | Identity password hashing and lockout counters behind `ICredentialVerifier`; the Login handler applies the generic-failure decision; dummy hash work for unknown email |
 | IV. Fixed roles | PASS | `AppRoles` canonical definition in Domain; idempotent seed; role route parameter validated against it; authorization policy `RequireAdministrator` |
 | V. Token security | PASS | RS256, externally supplied key (PEM or PFX), JWKS endpoint + public key file for consumers, explicit iss/aud/sig/lifetime validation |
 | VI. Persistence as infrastructure | PASS | EF/Identity types only in Infrastructure; migrations only; no `EnsureCreated`; migrations applied by explicit `--migrate` command |
 | VII. Explicit API contracts | PASS | Request/response records per slice; Identity entities never serialized; ProblemDetails |
 | VIII. OpenAPI and Scalar | PASS (verify) | Production behavior verified against the installed package in the implementation phase, with a fallback that removes the execution target (research R9) |
-| IX. Container-first | PASS | `dev` Compose service owns all dotnet work; agent container never runs `dotnet` |
-| X. Docker reproducibility | PASS | Multi-stage `Dockerfile`, `Dockerfile.dev`, `compose.yaml`, `.dockerignore`, named volume |
-| XI. Minimal testing | PASS | Two test projects, about 15 high-value tests, validation-gate coverage only |
+| IX. Container-first | PASS | `dev` Compose service owns all dotnet work; a repository-built `tools` service (pinned base image) provides sqlite3, openssl and curl so no ad-hoc public images or agent-side tools are needed; agent container never runs `dotnet` |
+| X. Docker reproducibility | PASS | Multi-stage `Dockerfile`, `Dockerfile.dev`, `Dockerfile.tools`, `compose.yaml`, `.dockerignore`, named volumes with explicit names; host-path variable `HOST_PROJECT_DIR` required (fail-fast) when the agent runs in a container |
+| XI. Minimal testing | PASS | Two test projects, 7 integration test files plus one architecture test file, validation-gate coverage only, no coverage target |
 | XII. Config, secrets, maintainability | PASS | Options pattern + `ValidateOnStart`; nullable enabled repo-wide via `Directory.Build.props`; secrets via env/mounted files |
 
 **Deviation from the suggested structure**: `tests/AuthService.Application.Tests/` is not created.
@@ -90,8 +92,10 @@ Directory.Build.props            # nullable enable, analyzers, warnings-as-error
 global.json                      # pins the .NET 10 SDK
 AuthService.slnx
 Dockerfile                       # multi-stage: sdk:10.0 build/publish -> aspnet:10.0 runtime
-Dockerfile.dev                   # sdk:10.0 + dotnet-ef tool
-compose.yaml                     # services: dev, auth-api, migrate; volume: auth-data
+Dockerfile.dev                   # sdk:10.0 + dotnet-ef tool; /data writable for any UID
+Dockerfile.tools                 # pinned alpine + sqlite3, openssl, curl for validation/smoke steps
+compose.yaml                     # services: dev, dev-api, tools, auth-api, migrate;
+                                 # volumes: authservice-dev-data, authservice-data, nuget-cache
 .dockerignore
 .env.example                     # documented variables, no secrets
 README.md
@@ -109,13 +113,21 @@ docs/
 src/
 ├── AuthService.Domain/
 │   ├── Roles/AppRoles.cs                    # canonical names, TryParse
+│   ├── Security/PasswordPolicy.cs           # 8 chars, upper, lower, digit; single source of the rule
 │   └── Sessions/RefreshToken.cs             # rotation / revoke / reuse state machine
 ├── AuthService.Application/
-│   ├── Abstractions/                        # only ports used by more than one slice
+│   ├── Abstractions/                        # narrow ports, each used by the slices that need it
 │   │   ├── IAccessTokenIssuer.cs
-│   │   ├── IClock.cs                        # only if TimeProvider is not sufficient
-│   │   └── IUserAccounts.cs                 # find/create/enable/roles/password over Identity
+│   │   ├── ICredentialVerifier.cs           # facts: found, password valid, locked out, enabled, roles
+│   │   ├── IUserDirectory.cs                # read: by id, by email, list, counts
+│   │   ├── IUserCreator.cs                  # atomic create of user with roles
+│   │   ├── IUserStateStore.cs               # set enabled
+│   │   ├── IUserRoleStore.cs                # get/add/remove role
+│   │   ├── IPasswordResetCodes.cs           # issue and redeem reset codes
+│   │   ├── IRefreshTokenStore.cs            # create, find, rotate, revoke family
+│   │   └── IUserSessionRevoker.cs           # revoke all sessions of a user
 │   └── Features/
+│       ├── Bootstrap/BootstrapAdministrator/ # decides whether first Administrator is created
 │       ├── Authentication/
 │       │   ├── Login/                       # request, response, handler
 │       │   ├── RefreshToken/
@@ -134,13 +146,13 @@ src/
 │           └── RemoveRole/                  # refuses last role / last admin
 ├── AuthService.Infrastructure/
 │   ├── Persistence/                         # AuthDbContext, entity configs, Migrations/
-│   ├── Identity/                            # ApplicationUser, IUserAccounts adapter, role seeding
+│   ├── Identity/                            # ApplicationUser, port adapters over UserManager (mechanics only), role seeding
 │   ├── Tokens/                              # signing key loader, JWT issuer, JWKS builder
-│   ├── Sessions/                            # refresh-token store (hashing)
-│   ├── Bootstrap/                           # first-Administrator hosted service
+│   ├── Sessions/                            # refresh-token store (hashing), session revoker
 │   └── DependencyInjection.cs
 └── AuthService.Api/
     ├── Program.cs                           # composition root
+    ├── Hosting/                             # bootstrap hosted service (calls the Application slice)
     ├── Features/<Feature>Endpoints.cs       # route groups, DTO binding, TypedResults
     ├── Security/                            # policies, rate limiting, CORS, options validation
     ├── OpenApi/                             # transformers, Scalar setup
@@ -152,10 +164,12 @@ tests/
 ```
 
 **Structure Decision**: four `src` projects matching the constitution's boundaries, plus two test
-projects. Ports in `Application/Abstractions` are limited to `IUserAccounts` (wraps Identity
-`UserManager`/`RoleManager`, shared by several slices), `IAccessTokenIssuer` (token signing), and a
-refresh-token store port used by the refresh, logout, login and disable slices. A slice-private
-abstraction lives in its own slice folder. No generic repository or unit of work.
+projects. Ports in `Application/Abstractions` are small and role-specific (listed in the
+Constitution Check, row II); one Infrastructure class may implement several of them. Adapters return
+facts or perform mechanics (hashing, transactions, framework calls); every decision is made in a
+handler or in Domain. A slice-private abstraction lives in its own slice folder. Application may use
+`Microsoft.Extensions.Logging.Abstractions` for FR-031 event logging. No generic repository or unit of
+work. The bootstrap hosted service lives in Api (host concern) and only calls the Application slice.
 
 ## Key Design Decisions (summary; detail in research.md)
 
@@ -166,15 +180,23 @@ abstraction lives in its own slice folder. No generic repository or unit of work
   (session). Rotation marks the old token `Rotated` and issues a new one in the same family; reuse of a
   `Rotated` or `Revoked` token revokes the family. Logout revokes the presented token's family only.
   Disable and password reset revoke all of the user's families.
-- **Bootstrap**: hosted service at startup. If `Users` is empty and `Bootstrap__AdminEmail` /
-  `Bootstrap__AdminPassword` are set, create one Administrator. If the store is non-empty it does
-  nothing and logs an informational line. Empty store with no bootstrap configuration in Production
-  fails startup with a clear message.
-- **Password reset**: Identity password-reset token (data-protection based, 24 h lifespan, invalidated
-  by the password change through the security stamp). Admin endpoint returns it once; user redeems it at
-  a public endpoint. Redemption revokes all sessions.
-- **Password rule**: Identity `PasswordOptions` (8 chars, upper, lower, digit); no lockout-based
-  account-existence leak, because lockout failures return the same generic 401.
+- **Bootstrap**: the Application slice `BootstrapAdministrator` decides: if the user count is zero and
+  `Bootstrap__AdminEmail` / `Bootstrap__AdminPassword` are provided and satisfy `PasswordPolicy`, it
+  asks `IUserCreator` to create the Administrator (user and role in one transaction); if any user exists
+  it does nothing. A hosted service in Api invokes it after migrations and role seeding, logs the
+  outcome, and in Production fails startup when the store is empty and no bootstrap values were given.
+- **Password reset**: Identity password-reset token behind `IPasswordResetCodes` (data-protection based,
+  lifespan `Identity:ResetCodeHours`, default 24, range 1 to 72, invalidated by the password change
+  through the security stamp). Admin endpoint returns it once; user redeems it at a public endpoint.
+  Redemption validates the new password with `PasswordPolicy` and revokes all sessions.
+- **Password rule**: single source in Domain `PasswordPolicy`; Identity `PasswordOptions` mirror its
+  constants as defense in depth. No lockout-based account-existence leak, because lockout failures
+  return the same generic 401.
+- **Throttling** (spec FR-021): Identity lockout 5 failures/15 minutes (reported as a fact by
+  `ICredentialVerifier`, decided by the Login handler) plus a per-source fixed window of 10 requests per
+  minute on login, refresh and reset-password; both configurable.
+- **Smoke validation networking**: the agent talks to the service through the `tools` container on the
+  compose network (`http://dev-api:8080` or `http://auth-api:8080`), never through host-published ports.
 - **Migrations**: explicit. The runtime image supports `--migrate` (apply and exit); compose provides a
   `migrate` service. The `dev` service sets `Database__MigrateOnStartup=true` for convenience only.
 - **Endpoints added beyond the suggested list, required by clarified requirements**:

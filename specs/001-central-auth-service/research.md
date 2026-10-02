@@ -29,8 +29,8 @@ and MUST be checked inside the dev container during implementation.
 
 ## R3. Access token content
 
-- **Decision**: claims `sub` (user id), `role` (one claim per role), `iss`, `aud`, `iat`, `nbf`, `exp`,
-  `jti`. Email is not included in the token; consumers needing it call `/api/me`. Lifetime 15 minutes
+- **Decision**: claims exactly `sub` (user id), `role` (one claim per role), `iss`, `aud`, `iat`, `exp`
+  (spec FR-007). No `jti`, no `nbf`, no email; consumers needing the email call `/api/me`. Lifetime 15 minutes
   (`Jwt:AccessTokenMinutes`). Claim names are not remapped (`MapInboundClaims = false`) with
   `RoleClaimType = "role"` and `NameClaimType = "sub"` on both the service and documented consumers.
 - **Rationale**: Minimal claims (Constitution V); email can change, tokens should not carry mutable data.
@@ -50,27 +50,36 @@ and MUST be checked inside the dev container during implementation.
 ## R5. Login without account enumeration
 
 - **Decision**: one generic 401 ProblemDetails for unknown email, wrong password, disabled account, and
-  lockout. For an unknown email, run a password verification against a fixed dummy hash to keep timing
-  close. Identity lockout (5 failures, 15 minutes) provides per-account throttling; ASP.NET rate limiter
-  (per-IP fixed window) covers login, refresh and reset-password endpoints and returns 429.
-- **Rationale**: Spec FR-005, FR-021.
-- **Alternatives**: identical timing guarantees are not claimed beyond best effort.
+  lockout. The `ICredentialVerifier` adapter only reports facts (user found, password valid, locked out,
+  enabled, roles); for an unknown email it performs verification against a fixed dummy hash so processing
+  time does not reveal existence. The Login handler makes the decision (fail unless found, valid,
+  enabled and not locked out). Identity lockout counters (5 failures, 15 minutes, configurable) provide
+  per-account throttling; the ASP.NET rate limiter (per source address, 10 requests/minute, configurable)
+  covers login, refresh and reset-password and returns 429.
+- **Rationale**: Spec FR-005, FR-021; constitution I (decisions not in adapters).
+- **Alternatives**: stronger timing guarantees are explicitly not promised (spec FR-005).
 
 ## R6. Password policy and reset
 
-- **Decision**: Identity `PasswordOptions`: length 8, require upper, lower, digit, no non-alphanumeric
-  requirement. Reset via `UserManager.GeneratePasswordResetTokenAsync`, token lifespan 24 hours
-  (`DataProtectionTokenProviderOptions`), single-use because the redemption changes the security stamp.
-  Data Protection keys persist at `/data/keys`.
+- **Decision**: the rule lives once, in Domain `PasswordPolicy` (length 8, upper, lower, digit, no
+  non-alphanumeric requirement), applied by the CreateUser, ResetPassword and BootstrapAdministrator
+  handlers; Identity `PasswordOptions` mirror the same constants as defense in depth. Reset via
+  `UserManager.GeneratePasswordResetTokenAsync` behind `IPasswordResetCodes`, token lifespan from
+  `Identity:ResetCodeHours` (default 24, allowed 1 to 72, `DataProtectionTokenProviderOptions`),
+  single-use because the redemption changes the security stamp. Data Protection keys persist at
+  `Database:DataProtectionKeysPath` (default `/data/keys`).
 - **Rationale**: Clarified rules, no email infrastructure, no custom crypto.
 - **Risk**: if the key ring is lost, outstanding reset codes become invalid; documented in operations.
 
 ## R7. First Administrator bootstrap
 
-- **Decision**: `BootstrapAdminService` (hosted, runs after the database check). Allowed only when the
-  user table has zero rows. Variables `Bootstrap__AdminEmail`, `Bootstrap__AdminPassword`. After any user
-  exists it performs no write and ignores configuration. Operators confirm via a log line
-  (`Bootstrap skipped: users already exist`) and by attempting a restart with different values.
+- **Decision**: the Application slice `BootstrapAdministrator` holds the rule (allowed only when
+  `IUserDirectory` reports zero users and valid credentials were provided, creating the user through
+  `IUserCreator`, which writes user and role in one transaction). A hosted service in Api calls it after
+  migrations and role seeding and logs the outcome. Variables `Bootstrap__AdminEmail`,
+  `Bootstrap__AdminPassword`. After any user exists the slice performs no write and the configuration is
+  ignored. Operators confirm via the log line `Bootstrap skipped: users already exist` and by restarting
+  with different values.
 - **Rationale**: Simplest secure behavior; no always-open endpoint exists.
 - **Alternatives**: one-time token endpoint (adds an unauthenticated write surface); CLI command (needs
   exec access to the container).
@@ -99,14 +108,17 @@ and MUST be checked inside the dev container during implementation.
   3. a document transformer that, in Production, removes `servers` and security schemes from the OpenAPI
      document so no request target or credential input exists, combined with `WithProxy(null)`.
   The implementation MUST include a smoke check that confirms the production page loads and no executable
-  target remains. The Production OpenAPI document contains no secrets, example tokens or internal URLs.
+  target remains (objective acceptance for SC-008: the production page has no send/execute control, no
+  server URL and no credential input, checked in the Phase 6 validation task). The Production OpenAPI
+  document contains no secrets, example tokens or internal URLs.
 - **Rationale**: Constitution VIII explicitly allows an equivalent configuration when exact behavior is
   not guaranteed. Server-side authorization remains the real protection.
 
 ## R10. Rate limiting, CORS, health
 
-- **Decision**: built-in `AddRateLimiter` fixed-window policies by remote IP for
-  `/api/auth/login`, `/api/auth/refresh`, `/api/auth/reset-password`. CORS origins from
+- **Decision**: built-in `AddRateLimiter` fixed-window policies by remote IP (default 10 requests per
+  minute, configurable, spec FR-021) for `/api/auth/login`, `/api/auth/refresh`,
+  `/api/auth/reset-password`. CORS origins from
   `Cors:AllowedOrigins`; with an empty list, no cross-origin access in Production. Behind a reverse
   proxy, forwarded headers are enabled by configuration only. `GET /health` returns 200/503 with a body
   of just `Healthy`/`Unhealthy` and checks database connectivity; it is anonymous and leaks nothing.
@@ -117,29 +129,52 @@ and MUST be checked inside the dev container during implementation.
 - **Decision**: options classes bound with `ValidateDataAnnotations` and custom validators,
   `ValidateOnStart`. Production requires: signing key configured and loadable, issuer, audience,
   RSA key at least 2048 bits, CORS list parseable, and bootstrap password when the store is empty.
+  `Database:MigrateOnStartup=true` is rejected outside Development. Startup logs the signing key
+  identifier and, for certificates, the expiry date (spec FR-031); validity dates are not enforced.
   Development may auto-generate a throwaway RSA key under `/data/dev-keys`, never active when
   `ASPNETCORE_ENVIRONMENT=Production`.
 
 ## R12. Docker layout
 
-- **Decision**: `Dockerfile` multi-stage (`sdk:10.0` publish, `aspnet:10.0` run, non-root user, volume
-  `/data`, `HEALTHCHECK` via the health endpoint using a minimal approach compatible with the image, since
-  the runtime image has no curl; alternatively health probing from Compose). `Dockerfile.dev` based on
-  `sdk:10.0` with `dotnet-ef` installed, source bind-mounted, NuGet cache on a named volume. Compose
-  services: `dev` (tooling and test runs), `auth-api` (runtime image, port 8080, volume), `migrate`
-  (one-shot). Key material supplied via bind-mounted secrets directory, never copied into the image.
-- **Rationale**: Principles IX and X.
+- **Decision**: `Dockerfile` multi-stage (`sdk:10.0` publish, `aspnet:10.0` run, non-root `app` user,
+  `/data` created and owned by that user before `VOLUME`, `HEALTHCHECK` through a `--healthcheck` switch
+  of the published app because the runtime image has no curl). `Dockerfile.dev` based on `sdk:10.0` with
+  `dotnet-ef` installed, `/data` and `/nuget` world-writable so any `LOCAL_UID` can write to new named
+  volumes, source bind-mounted from `${HOST_PROJECT_DIR:?}`. `Dockerfile.tools` is a pinned Alpine image
+  with sqlite3, openssl and curl. Compose services: `dev` (tooling and tests), `dev-api` (runs the app
+  from source in Development, profile `run`), `tools`, `auth-api` (runtime image, Production default),
+  `migrate` (one-shot, same image and volume as `auth-api`). Volumes have explicit names:
+  `authservice-dev-data` (dev, `dev-api`, `dev`), `authservice-data` (production), `nuget-cache`. Host
+  published ports are only for humans (`DEV_API_PORT` default 8081, `API_PORT` default 8080) and differ
+  so both can run. Key material is supplied through a read-only bind mount of `${SIGNING_KEY_DIR}` and
+  never copied into an image.
+- **Rationale**: Principles IX and X; the agent container reaches the service only through the compose
+  network (see R14).
 
 ## R13. Testing approach
 
 - **Decision**: `AuthService.IntegrationTests` using `WebApplicationFactory<Program>` with a temp-file
-  SQLite database per fixture, a generated RSA key, and seeded users per role. Planned tests (about 15):
-  login success, login failure, disabled login, token signature + issuer/audience via an independent
-  `JwtBearer` validation using only the public key, role claims present, admin allowed, manager and
-  operator forbidden, assign supported role, reject unsupported role, last-role/last-admin guard, refresh
-  rotation, rotated-token reuse revokes family, logout revokes session, password reset redeem, bootstrap
-  only on empty store, and persistence round trip after a context re-creation.
+  SQLite database per fixture, a generated RSA key, and seeded users per role. Planned tests, grouped in 7
+  files: login success, login failure, disabled login (LoginTests); token signature + issuer/audience via
+  an independent `JwtBearer` validation using only the public key, role claims present (JwtTests); admin
+  allowed, manager and operator forbidden (AuthorizationTests); assign supported role, reject
+  unsupported role, last-role and last-admin guards (RoleAssignmentTests); refresh rotation, rotated-token
+  reuse revokes family, logout revokes session, password-reset redemption revokes sessions
+  (RefreshTokenTests); bootstrap only on an empty store (BootstrapTests); persistence round trip after a
+  host restart (PersistenceTests).
   `AuthService.ArchitectureTests` has four reference checks. Nothing else.
 - **Rationale**: Constitution XI and the validation gate.
 - **Package versions**: pin the latest .NET 10 compatible versions at implementation time; record the
   resolved versions in `Directory.Packages.props`.
+
+## R14. Smoke validation from an agent container
+
+- **Decision**: all HTTP checks run inside the compose network with
+  `docker compose run --rm tools curl http://dev-api:8080/...` (or `http://auth-api:8080`), and database
+  inspection with `docker compose run --rm -v authservice-dev-data:/data:ro tools sqlite3 ...`.
+  Readiness before the health endpoint exists (Phase 3 to 5) polls `/.well-known/jwks.json`; afterwards
+  `/health`. Services are started detached.
+- **Rationale**: the agent container uses the host Docker daemon, so host-published ports and host paths
+  are not reachable or resolvable from the agent's own network and filesystem namespace. `HOST_PROJECT_DIR`
+  must be the repository path as seen by the host daemon; it is found with `docker inspect` of the agent
+  container's mounts and documented in `docs/development.md`.
