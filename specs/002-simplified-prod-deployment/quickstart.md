@@ -16,13 +16,13 @@ All steps run from a clean checkout on a host with Docker only.
 9. Log in again → 200.
 10. User and refresh-session state still present.
 11. JWKS `kid` identical; a pre-recreate access token still validates.
-12. `docker run --rm -v simplecheck-data:/data alpine ls -l /data/signing` → `signing.pem` present, mode `-rw-------`.
+12. (plain `docker`, not `dc`) `docker run --rm -v simplecheck-data:/data alpine ls -l /data/signing` → `signing.pem` present, mode `-rw-------`.
 
 ## B. Compatibility (SC-008, SC-009)
-13. Explicit PEM (`SIGNING_KEY_DIR` + `Jwt__Signing__PrivateKeyPemPath`): starts, `kid` ≠ generated, no new `/data/signing` file.
-14. Explicit PFX with password: starts.
-15. `Database__MigrateOnStartup=false`: `up` fails with "run the migrate service"; `docker compose run --rm migrate` then `up` succeeds.
-16. `APP_UID=20001 APP_GID=20001` rebuild with a fresh volume: starts, process uid is 20001.
+13. Explicit PEM (`SIGNING_KEY_DIR` + `Jwt__Signing__PrivateKeyPemPath`), `dc up -d`: starts, `kid` ≠ generated, no new `/data/signing` file.
+14. Explicit PFX with password, `dc up -d`: starts.
+15. `Database__MigrateOnStartup=false`: `dc up -d` fails with "run the migrate service"; `dc run --rm migrate` then `dc up -d` succeeds.
+16. `APP_UID=20001 APP_GID=20001` `dc up -d --build` with a fresh volume: starts, process uid is 20001.
 17. `HOST_PROJECT_DIR` unset: `docker compose config` and `up` succeed.
 18. `LOCAL_UID/LOCAL_GID` set to arbitrary values: no effect on `auth-api`.
 
