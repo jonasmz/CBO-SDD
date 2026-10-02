@@ -96,7 +96,13 @@ Fetch `<base>/.well-known/jwks.json`, configure a sample consumer (see
 expired, tampered, wrong-issuer and wrong-audience tokens rejected; Administrator-only endpoint rejects a
 Manager and Operator token.
 
-## 8. Documentation modes
+## 8. Backup and restore drill
+
+Follow `docs/database.md`: stop `auth-api`, copy `/data/auth.db` and `/data/keys` with the `tools` image into a
+backup, restore them into a throwaway volume, start a service instance on it and confirm the same users,
+roles and enabled states exist and sign-in works (SC-012).
+
+## 9. Documentation modes
 
 - Development (`ASPNETCORE_ENVIRONMENT=Development`, service `dev-api`): `/scalar` renders and requests
   can be executed from it with a bearer token.

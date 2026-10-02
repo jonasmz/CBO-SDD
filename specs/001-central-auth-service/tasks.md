@@ -232,8 +232,63 @@ production container.
 - [ ] T095 **Final validation (clean state)**: remove local build output and volumes (`docker compose down -v`), then `docker compose build` and confirm success (depends on T072, T073, T085 to T094)
 - [ ] T096 **Final validation (restore/build/test)**: run `docker compose run --rm dev dotnet restore`, `dotnet build --no-restore`, `dotnet test --no-build` and confirm all succeed; record the actual output summary in the task notes (depends on T095)
 - [ ] T097 **Final validation (migrations)**: create a throwaway migration with `docker compose run --rm dev dotnet ef migrations add ValidationProbe ...`, confirm it is generated, remove it with `dotnet ef migrations remove`, then apply the real migrations with `docker compose run --rm migrate` (depends on T096)
-- [ ] T098 **Final validation (startup and smoke)**: start `auth-api` with bootstrap values and a generated key; execute every step of `specs/001-central-auth-service/quickstart.md` through the `tools` service (login, `/api/me`, role denial, refresh rotation and reuse, logout, bootstrap closed on restart, persistence across `docker compose down` and `up`, JWKS validation, Development versus Production Scalar behavior); time the login request (expect well under 2 seconds, SC-001) and time the first-Administrator procedure from a clean volume (expect under 15 minutes, SC-007); record real results (depends on T097)
+- [ ] T098 **Final validation (startup and smoke)**: start `auth-api` with bootstrap values and a generated key; execute every step of `specs/001-central-auth-service/quickstart.md` through the `tools` service (login, `/api/me`, role denial, refresh rotation and reuse, logout, bootstrap closed on restart, persistence across `docker compose down` and `up`, JWKS validation, Development versus Production Scalar behavior); time the login request (expect well under 2 seconds, SC-001) and time the first-Administrator procedure from a clean volume (expect under 15 minutes, SC-007); run the documented backup and restore drill from `docs/database.md` (stop `auth-api`, copy the database file and key ring with the `tools` image into a backup, create a throwaway volume, restore into it, start a second service instance on that volume) and confirm 100% of users, roles and enabled states are present and sign-in works (SC-012); record real results (depends on T097)
 - [ ] T099 **Final validation (Docker-only compliance)**: confirm `which dotnet`, `which sqlite3`, `which openssl` fail in the agent container; confirm no task or document invokes `dotnet`, `curl` against published ports, or ad-hoc `docker run` of public images; list in the task notes any `specs/001-central-auth-service/checklists/security.md` items that are now resolved by the artifacts (the reviewer owns the checkboxes and they are not edited) (depends on T098)
+
+---
+
+## Requirement Traceability
+
+Every requirement maps to at least one task. Where a task does not name its requirement, this table is the
+authority.
+
+| Requirement | Tasks |
+|---|---|
+| FR-001 sole credential owner | T015, T031, T090 |
+| FR-002 fixed roles | T012, T019, T055, T079 |
+| FR-003 email login | T032, T035, T076 |
+| FR-004 user fields, at least one role | T015, T016, T053, T055 |
+| FR-005 identical failure | T031, T032, T035, T076 |
+| FR-006 disabled users | T032, T044, T054, T076 |
+| FR-007 token and lifetime | T028, T030, T077 |
+| FR-008 independent verification | T033, T036, T077, T090 |
+| FR-009 asymmetric key, key exclusivity | T028, T029, T073, T074 |
+| FR-010 public keys, rotation, expiry date | T029, T036, T093, T094 |
+| FR-011 current identity | T051, T058 |
+| FR-012 user administration | T052 to T059, T078 |
+| FR-013 server-side enforcement | T034, T059, T078 |
+| FR-014 password reset | T050, T056, T057, T080 |
+| FR-015 password rule and confidentiality | T013, T018, T053, T057 |
+| FR-016 refresh token | T039 to T043 |
+| FR-017 single use and reuse | T044, T080 |
+| FR-018 logout and disable | T045, T054, T080 |
+| FR-019 bootstrap | T020 to T023, T081, T094 |
+| FR-020 last administrator and last role | T054, T055, T079 |
+| FR-021 throttling | T014, T031, T068 |
+| FR-022 error format | T065 |
+| FR-023 reference docs | T062, T064 |
+| FR-024 development and production docs | T063, T064, T074 |
+| FR-025 persistence and migrations | T024, T025, T092, T097 |
+| FR-026 startup validation | T066, T074 |
+| FR-027 operational docs | T085 to T094 |
+| FR-028 Docker-only | T002 to T011, T095 to T099 |
+| FR-029 minimal tests | T075 to T084 |
+| FR-030 new consumer integration | T090 |
+| FR-031 security event logging | T023, T029, T032, T044, T054 to T057 |
+| FR-032 CORS | T067 |
+| FR-033 health | T069, T071 |
+| SC-001 sign-in time | T098 |
+| SC-002 identical refusals | T076 |
+| SC-003 independent validation | T077 |
+| SC-004 Administrator-only | T078 |
+| SC-005 unsupported roles | T079 |
+| SC-006 refresh token reuse | T048, T080 |
+| SC-007 first Administrator | T081, T098 |
+| SC-008 production docs read-only | T064, T074 |
+| SC-009 Docker-only | T095 to T099 |
+| SC-010 minimal suite | T084 |
+| SC-011 consumer integration docs | T090 |
+| SC-012 restore from backup | T092, T098 |
 
 ---
 
