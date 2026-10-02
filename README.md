@@ -8,17 +8,30 @@ The code follows four inward-pointing layers: Domain, Application, Infrastructur
 builds, tests, migrations, and runtime operations are Docker-first; a local .NET installation is neither
 needed nor supported by the documented workflow.
 
-## Prerequisites and quick start
+## Production quick start
 
-- Docker Engine with Compose v2
-- permission to use the Docker daemon
-- network access for the initial image build and NuGet restore
-- writable Docker named volumes
+To run the service on a small installation:
+
+```bash
+cp .env.production.example .env
+edit .env
+docker compose up -d --build
+```
+
+Fill in the Administrator email/password, token issuer and audience, and your front end's CORS origin. The
+first start creates the database, applies migrations, generates a persistent signing key and creates the first
+Administrator. Full instructions, advanced options (external signing keys, manual migrations, recovery) and
+backup guidance: [Production deployment](docs/deployment.md).
+
+## Development quick start
+
+Prerequisites: Docker Engine with Compose v2, permission to use the Docker daemon, network access for the
+initial image build and NuGet restore, and writable Docker named volumes.
 
 ```bash
 cp .env.example .env
 # Set HOST_PROJECT_DIR to the absolute checkout path as seen by the Docker daemon.
-# Set bootstrap credentials, APP_UID/APP_GID, and production signing configuration.
+# Set Jwt__Issuer and Jwt__Audience. .env.example already sets COMPOSE_FILE to load compose.dev.yaml.
 chmod 0600 .env
 docker compose build dev tools
 docker compose run --rm dev dotnet restore
@@ -28,7 +41,8 @@ docker compose --profile run up -d dev-api
 docker compose run --rm -T tools curl -fsS http://dev-api:8080/health
 ```
 
-Create migrations in the development container and apply them with the one-shot migration mode:
+Create migrations in the development container and apply them with the one-shot migration mode (this is also the
+manual-migration path for production; the production template migrates automatically):
 
 ```bash
 docker compose run --rm dev dotnet ef migrations add <Name> \
@@ -47,7 +61,8 @@ single-use session credentials. See the authentication and consumer guides befor
 - `src/AuthService.Infrastructure` — Identity, EF Core/SQLite, sessions, and JWT signing
 - `src/AuthService.Api` — HTTP endpoints, middleware, policies, OpenAPI, and composition
 - `tests/` — minimal integration and architecture verification
-- `compose.yaml`, `Dockerfile*` — development tooling and production runtime images
+- `compose.yaml` (production runtime), `compose.dev.yaml` (development/tooling services), `Dockerfile*`
+- `.env.production.example` (production settings) and `.env.example` (development settings)
 - `docs/` — detailed development, deployment, integration, and operations guides
 
 ## Documentation
@@ -59,7 +74,7 @@ single-use session credentials. See the authentication and consumer guides befor
 - [JWT consumer integration](docs/jwt-consumer-integration.md)
 - [Configuration reference](docs/configuration.md)
 - [Database, backup, and restore](docs/database.md)
-- [Deployment](docs/deployment.md)
+- [Production deployment](docs/deployment.md)
 - [Operations](docs/operations.md)
 
 The HTTP and token contracts are in `specs/001-central-auth-service/contracts/`. Production should be

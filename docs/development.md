@@ -3,21 +3,40 @@
 Only Docker Engine and Compose v2 are required. The initial image build and restore need network access;
 the Docker daemon must be usable and the named cache/data volumes must be writable.
 
-## Environment and identities
+## Compose files and environment
+
+Compose is split in two files:
+
+- `compose.yaml` - the production runtime only (`auth-api` and the profile-gated `migrate`). It needs no
+  development variables.
+- `compose.dev.yaml` - the development and tooling services (`dev`, `dev-api`, `tools`) and their volumes.
+
+`.env.example` sets `COMPOSE_FILE=compose.yaml:compose.dev.yaml`, so after
 
 ```bash
 cp .env.example .env
 chmod 0600 .env
 ```
 
+every `docker compose ...` command in this guide sees both files and works without extra flags. Without that
+variable (for example in a shell that ignores `.env`), pass the files explicitly:
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml build dev tools
+```
+
+A production host copies `.env.production.example` instead and never sets `COMPOSE_FILE`; see
+[deployment.md](deployment.md).
+
 Set `HOST_PROJECT_DIR` to the absolute checkout path as seen by the host Docker daemon. On a host this is
 usually `pwd`. If the developer/agent itself runs in a container, inspect that container's mounts from the
 host (`docker inspect <container>`) and use the host-side `Source` corresponding to this checkout. A path
-visible only inside the agent container will not work for the bind mount.
+visible only inside the agent container will not work for the bind mount. Set `Jwt__Issuer` and
+`Jwt__Audience` for `dev-api`.
 
 `LOCAL_UID`/`LOCAL_GID` identify only `dev`, `dev-api`, and local validation helpers (defaults 1000:1000).
-`APP_UID`/`APP_GID` identify only the production runtime and migration containers (documented defaults
-10001:10001). The sets are independent and must not be mixed; `.env` is authoritative for Compose.
+`APP_UID`/`APP_GID` are an optional override of the production runtime identity (built-in default 10001:10001)
+and are independent of the development identity; do not mix them.
 
 ## Build, restore, build, and test
 
@@ -49,7 +68,8 @@ Apply migrations to the development volume with the development API, or explicit
 docker compose run --rm dev dotnet run --project src/AuthService.Api -- --migrate
 ```
 
-Production migrations use `docker compose run --rm migrate`; see the database guide.
+Manual production migrations use `docker compose run --rm migrate` (the production template migrates
+automatically); see the database guide.
 
 ## Run and inspect Development
 
