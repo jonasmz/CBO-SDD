@@ -5,17 +5,22 @@ using Microsoft.Extensions.Options;
 
 namespace AuthService.Api.Hosting;
 
-public sealed partial class BootstrapHostedService(
+/// <summary>
+/// Creates the first Administrator on an empty user store. Invoked inline from <c>Program.cs</c> before the
+/// server starts, so startup ordering never depends on hosted-service/Kestrel start order.
+/// </summary>
+public sealed partial class BootstrapRunner(
     IServiceScopeFactory scopeFactory,
     IHostEnvironment environment,
     IOptions<BootstrapOptions> options,
-    ILogger<BootstrapHostedService> logger) : IHostedService
+    ILogger<BootstrapRunner> logger)
 {
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var handler = scope.ServiceProvider.GetRequiredService<BootstrapAdministratorHandler>();
         var configuration = options.Value;
+        // The handler checks for existing users first: when users exist the configured values are never validated or used.
         var outcome = await handler.HandleAsync(
             new BootstrapAdministratorCommand(configuration.AdminEmail, configuration.AdminPassword),
             cancellationToken);
@@ -38,11 +43,12 @@ public sealed partial class BootstrapHostedService(
 
         if (!environment.IsDevelopment() && outcome is BootstrapAdministratorOutcome.SkippedNotConfigured or BootstrapAdministratorOutcome.InvalidConfiguration)
         {
-            throw new InvalidOperationException("Bootstrap Administrator configuration is missing or invalid for an empty user store.");
+            throw new InvalidOperationException(
+                "Bootstrap Administrator configuration is missing or invalid for an empty user store: "
+                + "Bootstrap__AdminEmail and Bootstrap__AdminPassword must both be set, with a valid email address "
+                + "and a password that satisfies the password policy.");
         }
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private static partial class Log
     {

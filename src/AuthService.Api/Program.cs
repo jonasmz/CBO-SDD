@@ -1,4 +1,5 @@
 using AuthService.Api.Hosting;
+using AuthService.Application.Abstractions;
 using AuthService.Application.Features.Bootstrap.BootstrapAdministrator;
 using AuthService.Infrastructure;
 using AuthService.Infrastructure.Identity;
@@ -28,12 +29,9 @@ if (Directory.Exists("/run/secrets/config"))
     builder.Configuration.AddKeyPerFile("/run/secrets/config", optional: true);
 }
 
+// Bootstrap values are validated only when the user store is empty (see BootstrapRunner), never at option binding.
 builder.Services.AddOptions<BootstrapOptions>()
-    .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName))
-    .Validate(options =>
-        string.IsNullOrWhiteSpace(options.AdminEmail) == string.IsNullOrWhiteSpace(options.AdminPassword),
-        "Bootstrap administrator email and password must be configured together.")
-    .ValidateOnStart();
+    .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApiOpenApi(builder.Environment);
 builder.Services.AddApiProblemDetails();
@@ -55,7 +53,7 @@ builder.Services.AddScoped<SetUserEnabledHandler>();
 builder.Services.AddScoped<ChangeUserRoleHandler>();
 builder.Services.AddScoped<IssuePasswordResetHandler>();
 builder.Services.AddScoped<BootstrapAdministratorHandler>();
-builder.Services.AddHostedService<BootstrapHostedService>();
+builder.Services.AddSingleton<BootstrapRunner>();
 
 var useForwardedHeaders = builder.Configuration.GetValue<bool>("ForwardedHeaders:Enabled");
 if (useForwardedHeaders)
@@ -82,7 +80,7 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
 }
 
 ValidateStartupOptions(app.Services);
-await PrepareDatabaseAsync(app.Services);
+await InitializeAsync(app.Services);
 app.UseApiProblemDetails();
 if (useForwardedHeaders)
 {
@@ -118,11 +116,34 @@ static async Task ApplyMigrationsAndSeedAsync(IServiceProvider services)
     await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync(migrate: true);
 }
 
-static async Task PrepareDatabaseAsync(IServiceProvider services)
+// Startup initialization. Any failure aborts the process before app.Run(), so nothing is served half-initialized.
+// Order: migrations/schema check -> fixed roles -> signing key -> bootstrap Administrator.
+// Signing precedes bootstrap because it must observe the installation state BEFORE the first user exists:
+// "users exist but the generated key is missing" is key loss, whereas "no users yet" is first provisioning.
+static async Task InitializeAsync(IServiceProvider services)
 {
-    await using var scope = services.CreateAsyncScope();
-    var options = scope.ServiceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync(options.MigrateOnStartup);
+    var jwt = services.GetRequiredService<IOptions<JwtOptions>>().Value;
+    var environment = services.GetRequiredService<IHostEnvironment>();
+
+    bool usersExist;
+    await using (var scope = services.CreateAsyncScope())
+    {
+        var options = scope.ServiceProvider.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+        await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync(options.MigrateOnStartup);
+        usersExist = await scope.ServiceProvider.GetRequiredService<IUserDirectory>().CountAsync() > 0;
+    }
+
+    var explicitSigningSource = !string.IsNullOrWhiteSpace(jwt.Signing.PrivateKeyPemPath)
+        || !string.IsNullOrWhiteSpace(jwt.Signing.CertificatePath);
+    if (!explicitSigningSource && !environment.IsDevelopment())
+    {
+        await services.GetRequiredService<PersistedSigningKey>().EnsureAsync(usersExist, jwt.Signing.AllowKeyRegeneration);
+    }
+
+    // Resolve eagerly so signing problems surface here rather than on the first token request.
+    _ = services.GetRequiredService<SigningKeyProvider>();
+
+    await services.GetRequiredService<BootstrapRunner>().RunAsync();
 }
 
 public partial class Program;
