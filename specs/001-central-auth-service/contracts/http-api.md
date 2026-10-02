@@ -26,7 +26,9 @@ Request: `{ "refreshToken": string }`
 - 200: same shape as login (new access token and new refresh token; the presented token is now invalid)
 - 401: unknown, expired (individual lifetime or session absolute lifetime), rotated, revoked token or disabled
   user. Presenting a rotated or revoked token additionally revokes the whole session. A new refresh token
-  never expires later than its session's absolute expiration.
+  never expires later than its session's absolute expiration. The session's absolute expiration is checked
+  first: once it has passed, even an already-rotated token is rejected as an expired session without
+  reuse-driven revocation.
 
 ### POST /api/auth/logout
 Request: `{ "refreshToken": string }`

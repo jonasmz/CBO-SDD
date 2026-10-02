@@ -182,7 +182,9 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
   Disable and password reset revoke all of the user's families. Each token has an individual lifetime
   (default 7 days, fresh on every rotation) capped at the session's absolute expiration (default 30 days
   from the original sign-in, never extended by rotation); both configurable and validated at startup
-  (`SessionOptions`, absolute >= individual).
+  (`SessionOptions`, absolute >= individual; bounds are owned by spec FR-016). Absolute session expiration is
+  checked first: a rotated token presented after it is rejected as an expired session without reuse-family
+  revocation.
 - **Bootstrap**: the Application slice `BootstrapAdministrator` decides: if the user count is zero and
   `Bootstrap__AdminEmail` / `Bootstrap__AdminPassword` are provided and satisfy `PasswordPolicy`, it
   asks `IUserCreator` to create the Administrator (user and role in one transaction); if any user exists
@@ -214,7 +216,10 @@ work. The bootstrap hosted service lives in Api (host concern) and only calls th
   Docker, userns-remap, orchestrators): provision a runtime-readable secret through the deployment mechanism
   (orchestrator secret) or inject an operator-owned 0600 secret into a container-visible location owned by
   the runtime user before startup; never run the container as root to read the key. A PFX password comes
-  only from external secret configuration, never a literal in a Dockerfile or Compose file; missing or
+  only from external secret configuration (production prefers mounted secret files via an optional
+  key-per-file configuration source at `/run/secrets/config`, or the platform's secret mechanism; `.env` with
+  secrets must be mode 0600 and untracked; environment variables can be visible through container
+  inspection, an accepted limitation), never a literal in a Dockerfile or Compose file; missing or
   invalid PFX credentials fail Production startup with a clear, secret-free message. Local throwaway
   validation keys are exempt. Development containers use `LOCAL_UID`/`LOCAL_GID` on `authservice-dev-data`;
   production uses `APP_UID`/`APP_GID` on `authservice-data`; the two never share a volume.

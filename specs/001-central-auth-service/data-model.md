@@ -63,7 +63,8 @@ Active --Rotate(now)--> Rotated        (only if the token and the session are no
 Active --Revoke(reason)--> Revoked
 Rotated --presented again--> family revoked (all tokens in FamilyId become Revoked: ReuseDetected)
 Revoked --presented--> rejected (family already revoked)
-Expired Active (token or session) --presented--> rejected (user must sign in with credentials)
+Any token of a session past SessionExpiresAt --presented--> rejected as expired session (checked first; no family revocation work, even for a Rotated token)
+Expired Active token --presented--> rejected (user must sign in with credentials)
 ```
 
 Family-level operations: revoke by `FamilyId` (logout, reuse), revoke by `UserId` (disable, reset).

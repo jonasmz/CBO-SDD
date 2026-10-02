@@ -57,7 +57,10 @@ and MUST be checked inside the dev container during implementation.
   `ReplacedByTokenId`. Individual lifetime 7 days (fresh on rotation); absolute session lifetime 30 days
   from the original sign-in; a rotated token's `ExpiresAt` is capped at `SessionExpiresAt`, so a session
   is sliding but bounded; defaults configurable, absolute must be >= individual, validated at startup
-  (individual 1 to 90 days, absolute 1 to 365 days). Rotation inside a transaction.
+  (individual 1 to 90 days, absolute 1 to 365 days, as required by spec FR-016). Precedence: the session's
+  absolute expiration is checked first, so a rotated token presented after it is rejected as an expired
+  session without reuse-family revocation; reuse detection applies to non-expired sessions. Rotation inside
+  a transaction.
   Reuse of a non-Active token revokes every token in the family. Expired rows retained until a documented
   cleanup (manual SQL or later task).
 - **Rationale**: Matches clarified rules; hashing means a database leak does not yield usable tokens.

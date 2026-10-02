@@ -62,7 +62,7 @@
 
 ## Session Renewal Requirements
 
-- [x] CHK039 Are the refresh-token lifetime and whether it is absolute or sliding stated unambiguously? [Clarity, Spec §FR-016, Clarifications] Evidence: Spec FR-016 and Clarifications (checklist resolution) (individual lifetime 7 days by default, fresh on rotation; absolute session lifetime 30 days by default from the original sign-in; rotation cannot extend it; sign in again at the cap; both configurable, validated at startup, absolute >= individual), US4 scenarios 5-6; Data Model RefreshToken (SessionStartedAt, SessionExpiresAt, capped ExpiresAt); Research R4, R11; Contracts http-api §refresh.
+- [x] CHK039 Are the refresh-token lifetime and whether it is absolute or sliding stated unambiguously? [Clarity, Spec §FR-016, Clarifications] Evidence: Spec FR-016 and Clarifications (checklist resolution) (individual lifetime 7 days by default, fresh on rotation; absolute session lifetime 30 days by default from the original sign-in; rotation cannot extend it; sign in again at the cap; both configurable with ranges 1-90 and 1-365 days, validated at startup, absolute >= individual, invalid values fail startup), US4 scenarios 5-6; Data Model RefreshToken (SessionStartedAt, SessionExpiresAt, capped ExpiresAt); Research R4, R11; Contracts http-api §refresh.
 - [x] CHK040 Is the persistence requirement for refresh tokens stated precisely (non-recoverable form, uniqueness, minimum entropy) in the spec and not only in the plan? [Completeness, Spec §FR-016, Plan §R4] Evidence: Spec FR-016 (opaque, stored only in non-recoverable form); Research R4 (32 random bytes, SHA-256 hash); Data Model RefreshToken (unique TokenHash).
 - [ ] CHK041 Is the retention and cleanup of expired, rotated and revoked token records specified, given that reuse detection depends on keeping them? [Gap, Plan §R4] OPEN [ACCEPTABLE DEFERRED]: Data Model and Research R4 keep rows until expiry plus a 'documented cleanup', but no cleanup procedure or documentation task exists.
 - [x] CHK042 Is behavior for two concurrent renewals with the same token defined, including the user-visible outcome? [Edge Case, Plan §R4] Evidence: Research R4 Concurrency (the second request sees Rotated, the family is revoked; a client racing itself is signed out).
@@ -127,7 +127,7 @@
 
 - [x] CHK081 Do the endpoints added in the plan (password-reset issue and redeem, JWKS) trace to explicit spec requirements and acceptance scenarios? [Traceability, Spec §FR-010, FR-014, Plan §Key Design Decisions] Evidence: Spec FR-014 and US3 scenario 7 (reset issue and redeem); Spec FR-010, US1 scenario 2, SC-003 (public key publication); Contracts http-api.
 - [x] CHK082 Is there an ID scheme linking each success criterion to its functional requirements so unmapped requirements can be detected? [Traceability, Gap] Evidence: Spec uses FR-/SC- IDs; tasks.md Requirement Traceability maps all 33 FR and 12 SC to tasks, so unmapped items are detectable.
-- [ ] CHK083 Are all values presented as defaults (15 min, 7 days, 24 h, lockout counts) marked as configurable with validation bounds in one authoritative place? [Consistency, Spec §FR-007, FR-014, FR-016] OPEN [ACCEPTABLE DEFERRED]: bounds exist for token lifetime (1-60) and reset code (1-72) but not for refresh lifetime or throttle limits, and no single authoritative table exists yet.
+- [ ] CHK083 Are all values presented as defaults (15 min, 7 days, 24 h, lockout counts) marked as configurable with validation bounds in one authoritative place? [Consistency, Spec §FR-007, FR-014, FR-016] OPEN [ACCEPTABLE DEFERRED]: bounds are now stated for token lifetime (1-60), reset code (1-72), refresh lifetime (1-90) and absolute session lifetime (1-365) in Spec FR-007, FR-014 and FR-016; throttle limits (FR-021) have no bounds and no single configuration table exists yet (documentation task).
 
 ## Review 2026-10-02 (after /speckit-analyze convergence)
 
@@ -156,4 +156,4 @@ Stale wording in Research R8 ('throwaway container') was corrected to the reposi
 - Add comments or findings inline
 - Link to relevant resources or documentation
 - Items are numbered sequentially for easy reference
-- Likeliest real defects found while drafting, worth resolving before `/speckit-tasks`: CHK011 (TLS), CHK012 (admin reset trust), CHK034 (certificate expiry behavior), CHK049 (bootstrap atomicity), CHK060 (host-path bind mounts when the agent runs in a container), CHK065 (Scalar production mode unverified), CHK072 (security event logging)
+- Current status and open items: see the Review 2026-10-02 section above.
