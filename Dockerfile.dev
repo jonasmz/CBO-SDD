@@ -1,0 +1,14 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+ENV PATH="/opt/dotnet-tools:${PATH}" \
+    DOTNET_CLI_HOME=/tmp/dotnet \
+    NUGET_PACKAGES=/nuget \
+    DOTNET_NOLOGO=1
+
+RUN dotnet tool install --tool-path /opt/dotnet-tools dotnet-ef --version "10.*" \
+    && chmod -R a+rX /opt/dotnet-tools \
+    && rm -rf /tmp/dotnet \
+    && mkdir -p /tmp/dotnet /data /nuget \
+    && chmod 0777 /tmp/dotnet /data /nuget
+
+WORKDIR /workspace
