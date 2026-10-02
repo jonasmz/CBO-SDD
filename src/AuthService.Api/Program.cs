@@ -3,6 +3,11 @@ using AuthService.Application.Features.Bootstrap.BootstrapAdministrator;
 using AuthService.Infrastructure;
 using AuthService.Infrastructure.Identity;
 using AuthService.Infrastructure.Persistence;
+using AuthService.Infrastructure.Tokens;
+using AuthService.Api.Security;
+using AuthService.Api.Features.Authentication;
+using AuthService.Api.Features.Metadata;
+using AuthService.Application.Features.Authentication.Login;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +21,10 @@ if (Directory.Exists("/run/secrets/config"))
 builder.Services.AddOptions<BootstrapOptions>()
     .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddOptions<JwtOptions>().Bind(builder.Configuration.GetSection(JwtOptions.SectionName)).ValidateDataAnnotations().Validate(x => !string.IsNullOrWhiteSpace(x.Issuer) && !string.IsNullOrWhiteSpace(x.Audience), "JWT issuer and audience are required.").ValidateOnStart();
+builder.Services.AddJwtBearerSetup();
+builder.Services.AddAuthorizationPolicies();
+builder.Services.AddScoped<LoginHandler>();
 builder.Services.AddScoped<BootstrapAdministratorHandler>();
 builder.Services.AddHostedService<BootstrapHostedService>();
 
@@ -29,6 +38,10 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
 
 ValidateStartupOptions(app.Services);
 await PrepareDatabaseAsync(app.Services);
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapAuthEndpoints();
+app.MapJwks();
 app.Run();
 
 static void ValidateStartupOptions(IServiceProvider services)

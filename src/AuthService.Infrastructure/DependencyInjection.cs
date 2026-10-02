@@ -1,5 +1,6 @@
 using AuthService.Domain.Security;
 using AuthService.Application.Abstractions;
+using AuthService.Infrastructure.Tokens;
 using AuthService.Infrastructure.Identity;
 using AuthService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.DataProtection;
@@ -64,6 +65,10 @@ public static class DependencyInjection
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<IUserDirectory, UserDirectory>();
         services.AddScoped<IUserCreator, UserCreator>();
+        services.AddScoped<ICredentialVerifier, CredentialVerifier>();
+        services.AddSingleton<SigningKeyProvider>();
+        services.AddSingleton<JwksBuilder>();
+        services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
         services.AddScoped<RoleSeeder>();
 
         return services;

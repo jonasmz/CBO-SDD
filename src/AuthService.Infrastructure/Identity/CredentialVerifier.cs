@@ -1,0 +1,4 @@
+using AuthService.Application.Abstractions;
+using Microsoft.AspNetCore.Identity;
+namespace AuthService.Infrastructure.Identity;
+public sealed class CredentialVerifier(UserManager<ApplicationUser> users) : ICredentialVerifier { private static readonly string Dummy=new PasswordHasher<ApplicationUser>().HashPassword(new ApplicationUser(),"dummy-password"); public async Task<CredentialCheck> CheckAsync(string email,string password,CancellationToken cancellationToken=default) { var u=await users.FindByEmailAsync(email); if(u is null){ _=new PasswordHasher<ApplicationUser>().VerifyHashedPassword(new ApplicationUser(),Dummy,password); return new(false,false,false,false,null,null,[]); } var ok=await users.CheckPasswordAsync(u,password); if(ok) await users.ResetAccessFailedCountAsync(u); else await users.AccessFailedAsync(u); return new(true,ok,await users.IsLockedOutAsync(u),u.IsEnabled,u.Id,u.Email,(await users.GetRolesAsync(u)).ToArray()); } }

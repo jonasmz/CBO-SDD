@@ -25,7 +25,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Database__MigrateOnStartup: "true"
-    command: dotnet run --project src/AuthService.Api
+    command: dotnet run --no-launch-profile --project src/AuthService.Api
     ports:
       - "${DEV_API_PORT:-8081}:8080"
     volumes:
