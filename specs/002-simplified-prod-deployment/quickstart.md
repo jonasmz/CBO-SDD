@@ -23,14 +23,14 @@ All steps run from a clean checkout on a host with Docker only.
 14. Explicit PFX with password, `dc up -d`: starts.
 15. `Database__MigrateOnStartup=false`: `dc up -d` fails with "run the migrate service"; `dc run --rm migrate` then `dc up -d` succeeds.
 16. `APP_UID=20001 APP_GID=20001` `dc up -d --build` with a fresh volume: starts, process uid is 20001.
-17. `HOST_PROJECT_DIR` unset: `docker compose config` and `up` succeed.
+17. `HOST_PROJECT_DIR` unset: `dc config` and `dc up -d` succeed.
 18. `LOCAL_UID/LOCAL_GID` set to arbitrary values: no effect on `auth-api`.
 
 ## C. Security (SC-006, SC-010)
-19. `docker compose logs auth-api` contains no PEM markers/password.
+19. `dc logs auth-api` contains no PEM markers/password.
 20. `docker run --rm --entrypoint sh <image> -c 'find / -name "*.pem"'` finds no signing key in the image.
 21. `git ls-files` / `git grep -n "BEGIN .*PRIVATE KEY"` finds nothing; `.env` is ignored.
-22. `docker compose exec auth-api id -u` ≠ 0.
+22. `dc exec auth-api id -u` ≠ 0.
 
 ## D. Fail-safe
 Delete `/data/signing/signing.pem` with users present → container exits with the missing-key error; set `Jwt__Signing__AllowKeyRegeneration=true` → starts with a new `kid` and a warning.
