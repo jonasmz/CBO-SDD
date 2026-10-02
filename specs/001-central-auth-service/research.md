@@ -143,6 +143,10 @@ and MUST be checked inside the dev container during implementation.
 
 ## R10. Rate limiting, CORS, health (spec FR-021, FR-032, FR-033)
 
+**R9 implementation verification:** Scalar.AspNetCore 2.12.0 exposes
+`HideTestRequestButton` and `HideClientButton`. Production uses both (fallback 1), retaining
+readable documentation while removing request execution and client selection.
+
 - **Decision**: built-in `AddRateLimiter` fixed-window policies by remote IP (default 10 requests per
   minute, configurable, spec FR-021) for `/api/auth/login`, `/api/auth/refresh`,
   `/api/auth/reset-password`. CORS origins from

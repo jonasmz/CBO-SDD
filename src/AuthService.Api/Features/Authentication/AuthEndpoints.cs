@@ -32,7 +32,7 @@ public static class AuthEndpoints
             return outcome.Kind == RefreshTokenOutcomeKind.Success
                 ? Results.Ok(outcome.Response)
                 : Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Invalid refresh token");
-        });
+        }).RequireRateLimiting(AuthService.Api.Security.RateLimitingSetup.AuthPolicy);
 
         group.MapPost("/logout", async (
             LogoutRequest request,
@@ -41,7 +41,7 @@ public static class AuthEndpoints
         {
             await handler.HandleAsync(request, cancellationToken);
             return Results.NoContent();
-        });
+        }).RequireRateLimiting(AuthService.Api.Security.RateLimitingSetup.AuthPolicy);
         group.MapPost("/reset-password", async (ResetPasswordRequest request, ResetPasswordHandler handler, CancellationToken cancellationToken) =>
         {
             var outcome = await handler.HandleAsync(request, cancellationToken);
@@ -51,6 +51,6 @@ public static class AuthEndpoints
                 ResetPasswordStatus.ValidationFailure => Results.ValidationProblem(new Dictionary<string,string[]> { ["newPassword"] = ["Password does not meet the rule."] }),
                 _ => Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Invalid reset code")
             };
-        });
+        }).RequireRateLimiting(AuthService.Api.Security.RateLimitingSetup.AuthPolicy);
     }
 }

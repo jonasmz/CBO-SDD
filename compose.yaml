@@ -38,6 +38,39 @@ services:
       context: .
       dockerfile: Dockerfile.tools
 
+  auth-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: "${APP_UID:?set APP_UID in .env}"
+        APP_GID: "${APP_GID:?set APP_GID in .env}"
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+    user: "${APP_UID}:${APP_GID}"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - authservice-data:/data
+      - "${SIGNING_KEY_DIR:-${HOST_PROJECT_DIR}/secrets}:/run/secrets/signing:ro"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: "${APP_UID:?set APP_UID in .env}"
+        APP_GID: "${APP_GID:?set APP_GID in .env}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__MigrateOnStartup: "false"
+    user: "${APP_UID}:${APP_GID}"
+    command: ["--migrate"]
+    volumes:
+      - authservice-data:/data
+
 volumes:
   authservice-dev-data:
     name: authservice-dev-data

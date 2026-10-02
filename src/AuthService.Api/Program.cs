@@ -9,6 +9,7 @@ using AuthService.Api.Features.Authentication;
 using AuthService.Api.Features.Metadata;
 using AuthService.Api.Features.Identity;
 using AuthService.Api.Features.Users;
+using AuthService.Api.OpenApi;
 using AuthService.Application.Features.Authentication.Login;
 using AuthService.Application.Features.Authentication.Logout;
 using AuthService.Application.Features.Authentication.RefreshToken;
@@ -29,6 +30,10 @@ if (Directory.Exists("/run/secrets/config"))
 builder.Services.AddOptions<BootstrapOptions>()
     .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName));
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddApiOpenApi();
+builder.Services.AddApiProblemDetails();
+builder.Services.AddConfiguredCors(builder.Configuration, builder.Environment);
+builder.Services.AddAuthRateLimiting(builder.Configuration);
 builder.Services.AddOptions<JwtOptions>().Bind(builder.Configuration.GetSection(JwtOptions.SectionName)).ValidateDataAnnotations().Validate(x => !string.IsNullOrWhiteSpace(x.Issuer) && !string.IsNullOrWhiteSpace(x.Audience), "JWT issuer and audience are required.").ValidateOnStart();
 builder.Services.AddJwtBearerSetup();
 builder.Services.AddAuthorizationPolicies();
@@ -48,6 +53,13 @@ builder.Services.AddHostedService<BootstrapHostedService>();
 
 var app = builder.Build();
 
+if (args.Contains("--healthcheck", StringComparer.Ordinal))
+{
+    using var client = new HttpClient();
+    try { Environment.ExitCode = (await client.GetAsync("http://localhost:8080/health")).IsSuccessStatusCode ? 0 : 1; } catch { Environment.ExitCode = 1; }
+    return;
+}
+
 if (args.Contains("--migrate", StringComparer.Ordinal))
 {
     await ApplyMigrationsAndSeedAsync(app.Services);
@@ -56,12 +68,18 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
 
 ValidateStartupOptions(app.Services);
 await PrepareDatabaseAsync(app.Services);
+app.UseApiProblemDetails();
+app.UseCors(CorsSetup.Policy);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapAuthEndpoints();
 app.MapJwks();
 app.MapMe();
 app.MapUsers();
+app.MapHealth();
+app.MapApiOpenApi();
+app.MapApiScalar();
 app.Run();
 
 static void ValidateStartupOptions(IServiceProvider services)
@@ -69,6 +87,8 @@ static void ValidateStartupOptions(IServiceProvider services)
     _ = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
     _ = services.GetRequiredService<IOptions<IdentityAccountOptions>>().Value;
     _ = services.GetRequiredService<IOptions<AuthService.Infrastructure.Sessions.SessionOptions>>().Value;
+    _ = services.GetRequiredService<IOptions<CorsOptions>>().Value;
+    _ = services.GetRequiredService<IOptions<RateLimitOptions>>().Value;
 }
 
 static async Task ApplyMigrationsAndSeedAsync(IServiceProvider services)
