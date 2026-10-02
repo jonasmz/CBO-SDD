@@ -8,6 +8,17 @@
 
 **Input**: User description: "Simplify production deployment of the existing Central Auth Service: a default path of copy env template, edit, `docker compose up -d --build`, with automatic first-start initialization (signing key, database schema, bootstrap administrator), while keeping the existing advanced deployment options as opt-in. No change to the domain, API contracts, authentication/authorization models, or architecture."
 
+## Clarifications
+
+### Session 2026-10-02
+
+- Accepted earlier: a persisted generated signing key that is corrupt, malformed, or unreadable fails startup and is never silently regenerated or rewritten; missing required issuer, audience, CORS origins, or bootstrap credentials on an empty database fail startup with no insecure defaults.
+- Q: Users exist but no persisted generated signing key is present, with no explicit PEM/PFX → A: Startup fails clearly. A key is generated only when the database is empty or absent. Recovery from key loss requires an explicit, documented operator opt-in that permits one-time generation.
+- Q: Default of automatic migration when the setting is absent → A: Absent means off in every environment. The production Compose configuration and `.env.production.example` set it on for the simple path. The existing rule rejecting it outside Development is removed (intentional compatibility change; installs that omit it keep explicit-migration behavior). If automatic migration fails, startup fails and nothing is served.
+- Q: Bootstrap validation on an empty database → A: Startup fails with a clear, secret-free error for both absent, only one supplied, invalid email, or a password violating the existing policy. Once any user exists, bootstrap values are ignored and not validated.
+- Q: Valid Production CORS configuration → A: At least one explicit origin; each must be an absolute http/https origin (scheme, host, optional port; no path or trailing slash); `*` and malformed entries are rejected; explicitly listed localhost origins are allowed; matching is exact with no normalization.
+- Q: Partial restore of persisted state → A: A complete backup is database + Data Protection key ring + generated signing key from the same point in time. Partial restores are unsupported but predictable: missing key with users present fails startup (FR-007a); a missing key ring invalidates previously protected data; no startup consistency check is added. Consequences are documented.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Deploy a small installation with three steps (Priority: P1)
@@ -80,7 +91,7 @@ An operator reads a single production deployment guide that presents "Quick depl
 
 - Bootstrap values are changed after users already exist: no additional user is created.
 - Bootstrap password remains in configuration after first start: no impact on behavior; removal is optional hardening.
-- Persistent volume contains a database but the generated signing key is missing: a new signing identity is generated and this is treated as a key replacement (documented).
+- Persistent volume contains users but the generated signing key is missing: startup fails clearly; a new key is generated only through an explicit, documented operator opt-in (key replacement event). An empty or absent database with no key is first provisioning and generates a key.
 - Signing key file exists but is unreadable or corrupt: startup fails with a clear, secret-free error rather than silently replacing the key.
 - Both PEM and PFX configured (conflicting external sources): startup fails clearly (only one active source permitted), consistent with existing behavior.
 - Startup migration fails: the service does not begin serving requests and reports a clear error.
@@ -106,18 +117,21 @@ An operator reads a single production deployment guide that presents "Quick depl
 
 - **FR-006**: When no external signing source is configured, the service MUST generate an RSA signing key of at least 2048 bits using a standard platform cryptographic facility on first startup.
 - **FR-007**: The generated key MUST be stored in persistent application storage outside the image, reused on every later start, and stable while that storage remains intact.
+- **FR-007a**: Automatic generation MUST occur only on first provisioning (no users in the database). If users exist and the generated key is absent, startup MUST fail unless the operator explicitly opts in to one-time regeneration.
 - **FR-008**: The generated private key MUST be readable only by the runtime identity, never logged, never exposed via API documentation or any endpoint, and never committed to the repository or baked into the image. Only public material is exposed via the existing public key set.
 - **FR-009**: Explicitly configured RSA PEM or PFX+password MUST take precedence over automatic generation; exactly one signing source may be active.
 
 **Database initialization**
 
 - **FR-010**: The service MUST support applying pending schema migrations automatically at startup, enabled by default for the simple deployment path, and MUST be disableable by configuration.
+- **FR-010a**: An absent migration-on-startup setting MUST mean disabled in all environments; the simple production Compose path MUST enable it explicitly. Enabling it in Production MUST be permitted.
 - **FR-011**: When automatic migration is disabled, the existing explicit migration service workflow MUST remain available and working. Migration logic MUST NOT be duplicated between the two modes.
 - **FR-012**: Startup order MUST be: migrations (if enabled) → fixed roles ensured → bootstrap Administrator created if required → begin serving requests. A failure at any step MUST prevent serving.
 
 **Bootstrap**
 
 - **FR-013**: The simple path MUST require only the bootstrap email and password. Bootstrap MUST create the first Administrator only when no users exist, and MUST NOT create further users after initialization even if bootstrap values change.
+- **FR-013a**: On an empty database, absent, partial, or invalid bootstrap credentials (including invalid email or policy-violating password) MUST fail startup with a clear error that does not reveal the password. When users exist, bootstrap values MUST NOT be validated or used.
 - **FR-014**: Deployment MUST NOT require removing the bootstrap password or recreating the container; documentation MUST recommend removal only as optional hardening.
 
 **Persistence**
@@ -127,6 +141,7 @@ An operator reads a single production deployment guide that presents "Quick depl
 **Security preservation**
 
 - **FR-016**: The feature MUST NOT weaken the password policy, authentication-failure behavior, token validation, authorization, health checks, or CORS restrictions, and MUST NOT expose development tooling by default. Wildcard/unrestricted CORS MUST NOT be the default.
+- **FR-016a**: In Production, CORS configuration MUST contain at least one explicit origin, each an absolute http/https origin without path or trailing slash. `*` and malformed entries MUST fail startup. Explicit localhost origins are permitted. Matching is exact.
 - **FR-017**: No secret (private key, bootstrap password) may be added to the repository or the image.
 
 **Documentation**
@@ -134,6 +149,7 @@ An operator reads a single production deployment guide that presents "Quick depl
 - **FR-018**: The production deployment guide MUST be restructured with "Quick deployment" first (essential settings only), followed by "Advanced deployment" covering external PEM/PFX signing, explicit migration service, custom runtime IDs, secret mounts, controlled key rotation, reverse proxy configuration, and other operational controls.
 - **FR-019**: Documentation MUST state the consequences of losing the generated signing key: previously issued access tokens can no longer be validated, consumers must obtain the replacement public key set, and a new signing identity is a key replacement event.
 - **FR-020**: Backup/restore documentation MUST be updated so that, with automatic signing, backup scope includes the database, protected-data key ring, and generated signing key; externally managed keys remain under external custody. Documentation MUST clearly warn that deleting the persistent volume destroys this state.
+- **FR-020a**: Documentation MUST define a complete backup as the three items taken together and describe the consequences of restoring only some of them, without adding startup consistency checks.
 - **FR-021**: Documentation MUST state that TLS is terminated at a reverse proxy for Internet-facing use, and that direct local/LAN deployment is possible; no reverse proxy is provided by this feature.
 
 **Compatibility**
