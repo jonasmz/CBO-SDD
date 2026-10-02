@@ -48,22 +48,22 @@ Post-design re-check: PASS (no new violations; no Complexity Tracking entries ne
 - **Domain**: none.
 - **Application**: none expected. Bootstrap email-format validity: today `UserCreator` rejection maps to `InvalidConfiguration`; confirm in implementation that a malformed address (e.g. `abc`) is rejected — if Identity accepts it, add a minimal email-format check inside the existing `BootstrapAdministratorHandler` (same slice).
 - **Infrastructure**: new `Tokens/PersistedSigningKey` (generate/load/validate/persist); `SigningKeyProvider` gains the auto branch; new `Persistence/DatabaseInitializer` (single migrate + journal-mode + role-seed routine); `JwtOptions.Signing` gains the recovery flag and `AutoKeyDirectory` default.
-- **API/composition root**: `Program.cs` startup ordering, `StartupValidation.cs`, `CorsSetup.cs`, `BootstrapHostedService`/options validation.
+- **API/composition root**: `Program.cs` startup ordering, `StartupValidation.cs`, `CorsSetup.cs`, `BootstrapHostedService` (→ inline `BootstrapRunner`)/options validation.
 - **Docker/Compose**: split compose files, production defaults, env templates.
 - **Docs**: see Documentation Plan.
 
 ## Design Decisions (details in [research.md](research.md))
 
 1. **Startup order** (before `app.Run`, so Kestrel is not bound and nothing is served):
-   validate options → `DatabaseInitializer` (migrate if enabled, else schema-currentness check) → fixed roles → signing-material resolve/create (needs user count, so it MUST precede bootstrap or a fresh install would always look "existing") → eager `SigningKeyProvider` resolve → bootstrap hosted service → ready. Any failure aborts the process.
+   validate options → `DatabaseInitializer` (migrate if enabled, else schema-currentness check) → fixed roles → signing-material resolve/create (needs user count, so it MUST precede bootstrap or a fresh install would always look "existing") → eager `SigningKeyProvider` resolve → bootstrap run inline from `Program.cs` (no hosted service, so order does not depend on Kestrel/hosted-service start order) → `app.Run()` → ready. Any failure aborts the process.
 2. **Signing source**: PEM xor PFX (both → error; PFX path without password or password without path → error; configured missing/unreadable file → error). Any explicit source disables auto mode. Neither → auto mode (Production). Development behavior unchanged.
 3. **Auto key**: `/data/signing/signing.pem` (path derived from the data volume; overridable `Jwt:Signing:AutoKeyPath`), PKCS#8 PEM, RSA 3072, dir mode 0700, file mode 0600 created with `CreateNew` to a temp name then atomic no-overwrite rename. Existing file → load; parse/size failure → fail; never rewritten.
 4. **Existing-install detection**: `IUserDirectory.CountAsync() > 0` after migrations. Key absent + users exist → fail unless recovery flag set.
 5. **Recovery opt-in**: `Jwt__Signing__AllowKeyRegeneration=true` permits generation only when the key file is absent (never over an existing/corrupt file); emits a warning on every start while set and a distinct "key replaced, new kid" event; docs say remove it afterwards. Not in the env template.
 6. **Migrations**: absent = false; Production `true` allowed (remove `DatabaseStartupValidator` rejection); `--migrate` CLI and startup both call `DatabaseInitializer`.
 7. **Bootstrap**: drop the `ValidateOnStart` "both-or-neither" check (it violates "ignored when users exist"); validation happens in the bootstrap flow only when the store is empty; Production failure on missing/partial/invalid/policy-violating; messages never contain the password.
-8. **CORS**: Production-only startup validation: ≥1 entry; each matches `^https?://[^/?#@\s]+$` and parses as absolute; no `*`; exact, no normalization. Development keeps its localhost fallback.
-9. **Compose**: `compose.yaml` = production (`auth-api`, `migrate`); `compose.dev.yaml` = `dev`, `dev-api`, `tools`. Reason: Compose interpolates `${HOST_PROJECT_DIR:?}` for every service even when profile-gated (verified), and un-profiled `dev`/`tools` would be started by `up`. `.env.example` (dev) sets `COMPOSE_FILE=compose.yaml:compose.dev.yaml`.
+8. **CORS**: Production-only startup validation: ≥1 entry; each matches `^https?://[^/?#@\s]+$` and parses as absolute; no `*` anywhere (incl. wildcard hosts); exact, no normalization. Development keeps its localhost fallback.
+9. **Compose**: `compose.yaml` = production (`auth-api`, `migrate`); `compose.dev.yaml` = `dev`, `dev-api`, `tools`. Reason: Compose interpolates `${HOST_PROJECT_DIR:?}` for every service even when profile-gated (verified), and un-profiled `dev`/`tools` would be started by `up`. `.env.example` (dev) sets `COMPOSE_FILE=compose.yaml:compose.dev.yaml`. `migrate` is profile-gated (`profiles: ["migrate"]`) so `up` never starts it; `docker compose run --rm migrate` still works.
    - `auth-api`: `APP_UID/GID` default 10001; `Database__MigrateOnStartup: ${Database__MigrateOnStartup:-false}` (template sets `true`); signing mount `${SIGNING_KEY_DIR:-authservice-signing-none}:/run/secrets/signing:ro` with an empty declared named volume as the no-op default (no host path needed, existing `SIGNING_KEY_DIR` users unaffected).
    - Image: `/data` pre-created and chowned to build-arg UID/GID so the fresh named volume inherits writable ownership.
 
@@ -72,7 +72,7 @@ Post-design re-check: PASS (no new violations; no Complexity Tracking entries ne
 | Area | Files |
 |---|---|
 | Infrastructure | `Tokens/SigningKeyProvider.cs`, `Tokens/JwtOptions.cs`, new `Tokens/PersistedSigningKey.cs`, new `Persistence/DatabaseInitializer.cs`, `DependencyInjection.cs` |
-| API | `Program.cs`, `Security/StartupValidation.cs`, `Security/CorsSetup.cs`, `Hosting/BootstrapHostedService.cs` |
+| API | `Program.cs`, `Security/StartupValidation.cs`, `Security/CorsSetup.cs`, `Hosting/BootstrapHostedService.cs` (→ inline `BootstrapRunner`) |
 | Application (conditional) | `Features/Bootstrap/BootstrapAdministrator/BootstrapAdministratorHandler.cs` |
 | Docker | `compose.yaml`, new `compose.dev.yaml`, `Dockerfile` (verify only), `.dockerignore` |
 | Config | new `.env.production.example`, `.env.example` (dev; add `COMPOSE_FILE`), `.gitignore` (`.env`) |
@@ -111,13 +111,14 @@ Existing suite untouched; no coverage target.
 
 | Existing use | Outcome |
 |---|---|
-| Explicit PEM / PFX / external PFX password | Unchanged semantics; `SIGNING_KEY_DIR` must now be set explicitly (the implicit `${HOST_PROJECT_DIR}/secrets` default is removed) — **intentional breaking change #1** |
+| Explicit PEM / PFX / external PFX password | Unchanged semantics; `SIGNING_KEY_DIR` must now be set explicitly (the implicit `${HOST_PROJECT_DIR}/secrets` default is removed) — **intentional change #1** |
 | `Database__MigrateOnStartup` omitted/false + `migrate` service | Unchanged (absent=false; compose default false) |
 | `MigrateOnStartup=true` in Production | Was rejected, now allowed (relaxation) |
 | Custom `APP_UID/APP_GID` | Unchanged; defaults now 10001 instead of required |
-| Bootstrap partial config with existing users | Previously failed startup; now ignored — **behavior change #2 (relaxation)** |
-| Production with no CORS origins | Previously started; now fails — **intentional breaking change #3** |
-| `docker compose run dev|tools` | Requires `COMPOSE_FILE` from dev `.env` (or `-f`) — **change #4**, documented in development guide |
+| Bootstrap partial config with existing users | Previously failed startup; now ignored — non-breaking relaxation |
+| Production with no CORS origins | Previously started; now fails — **intentional change #2** |
+| `docker compose run dev|tools` | Requires `COMPOSE_FILE` from dev `.env` (or `-f`) — **intentional change #3**, documented in development guide |
+| `Database__MigrateOnStartup` absent | Stays false; only the production template sets true (explicit opt-in) — **intentional change #4 (no behavior change for existing installs)** |
 | Plain `docker compose up` previously started dev/tools too | Now only `auth-api` (fix) |
 
 ## Risk Analysis

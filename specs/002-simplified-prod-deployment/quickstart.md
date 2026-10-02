@@ -1,20 +1,22 @@
 # Quickstart: End-to-End Validation
 
-All steps run from a clean checkout on a host with Docker only. Use a throwaway Compose project (`-p simplecheck`) so the real volume is untouched.
+All steps run from a clean checkout on a host with Docker only.
+
+**Isolation (A0)**: `compose.yaml` pins the data volume with `name: authservice-data`, so `-p` alone does NOT isolate state and `down -v` would delete a real installation's data. Use a disposable validation host, or abort if `docker volume inspect authservice-data` succeeds. Create an untracked `validation-override.yaml` containing `volumes: { authservice-data: { name: simplecheck-data } }` and use `docker compose -p simplecheck -f compose.yaml -f validation-override.yaml ...` for every command below (abbreviated `dc`). Delete the override at the end.
 
 ## A. Simple path (SC-001…SC-007, SC-012)
-1. `docker compose -p simplecheck down -v` (clean volume).
+1. `dc down -v` (clean `simplecheck-data` volume).
 2. `cp .env.production.example .env`; set the five required values.
-3. `docker compose -p simplecheck up -d --build` — no other command.
+3. `dc up -d --build` — no other command; `dc ps --services` lists only `auth-api`.
 4. Wait for `healthy`.
 5. `POST /api/auth/login` as the bootstrap Administrator → 200.
 6. `GET /api/me` with the access token → Administrator role.
-7. `GET /.well-known/jwks.json` (use the repo's actual JWKS route) → record `kid`.
-8. `docker compose -p simplecheck up -d --force-recreate auth-api`.
+7. `GET /.well-known/jwks.json` → record `kid`.
+8. `dc up -d --force-recreate auth-api`.
 9. Log in again → 200.
 10. User and refresh-session state still present.
 11. JWKS `kid` identical; a pre-recreate access token still validates.
-12. `docker run --rm -v simplecheck_authservice-data:/data alpine ls -l /data/signing` → `signing.pem` present, mode `-rw-------`.
+12. `docker run --rm -v simplecheck-data:/data alpine ls -l /data/signing` → `signing.pem` present, mode `-rw-------`.
 
 ## B. Compatibility (SC-008, SC-009)
 13. Explicit PEM (`SIGNING_KEY_DIR` + `Jwt__Signing__PrivateKeyPemPath`): starts, `kid` ≠ generated, no new `/data/signing` file.
