@@ -19,6 +19,7 @@ using AuthService.Application.Features.Users;
 using AuthService.Infrastructure.Sessions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,12 +29,17 @@ if (Directory.Exists("/run/secrets/config"))
 }
 
 builder.Services.AddOptions<BootstrapOptions>()
-    .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName));
+    .Bind(builder.Configuration.GetSection(BootstrapOptions.SectionName))
+    .Validate(options =>
+        string.IsNullOrWhiteSpace(options.AdminEmail) == string.IsNullOrWhiteSpace(options.AdminPassword),
+        "Bootstrap administrator email and password must be configured together.")
+    .ValidateOnStart();
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddApiOpenApi();
+builder.Services.AddApiOpenApi(builder.Environment);
 builder.Services.AddApiProblemDetails();
 builder.Services.AddConfiguredCors(builder.Configuration, builder.Environment);
 builder.Services.AddAuthRateLimiting(builder.Configuration);
+builder.Services.AddStartupValidation();
 builder.Services.AddOptions<JwtOptions>().Bind(builder.Configuration.GetSection(JwtOptions.SectionName)).ValidateDataAnnotations().Validate(x => !string.IsNullOrWhiteSpace(x.Issuer) && !string.IsNullOrWhiteSpace(x.Audience), "JWT issuer and audience are required.").ValidateOnStart();
 builder.Services.AddJwtBearerSetup();
 builder.Services.AddAuthorizationPolicies();
@@ -50,6 +56,15 @@ builder.Services.AddScoped<ChangeUserRoleHandler>();
 builder.Services.AddScoped<IssuePasswordResetHandler>();
 builder.Services.AddScoped<BootstrapAdministratorHandler>();
 builder.Services.AddHostedService<BootstrapHostedService>();
+
+var useForwardedHeaders = builder.Configuration.GetValue<bool>("ForwardedHeaders:Enabled");
+if (useForwardedHeaders)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    });
+}
 
 var app = builder.Build();
 
@@ -69,6 +84,10 @@ if (args.Contains("--migrate", StringComparer.Ordinal))
 ValidateStartupOptions(app.Services);
 await PrepareDatabaseAsync(app.Services);
 app.UseApiProblemDetails();
+if (useForwardedHeaders)
+{
+    app.UseForwardedHeaders();
+}
 app.UseCors(CorsSetup.Policy);
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -89,6 +108,8 @@ static void ValidateStartupOptions(IServiceProvider services)
     _ = services.GetRequiredService<IOptions<AuthService.Infrastructure.Sessions.SessionOptions>>().Value;
     _ = services.GetRequiredService<IOptions<CorsOptions>>().Value;
     _ = services.GetRequiredService<IOptions<RateLimitOptions>>().Value;
+    _ = services.GetRequiredService<IOptions<JwtOptions>>().Value;
+    _ = services.GetRequiredService<IOptions<BootstrapOptions>>().Value;
 }
 
 static async Task ApplyMigrationsAndSeedAsync(IServiceProvider services)

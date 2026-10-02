@@ -145,7 +145,10 @@ and MUST be checked inside the dev container during implementation.
 
 **R9 implementation verification:** Scalar.AspNetCore 2.12.0 exposes
 `HideTestRequestButton` and `HideClientButton`. Production uses both (fallback 1), retaining
-readable documentation while removing request execution and client selection.
+readable documentation while removing request execution and client selection. The Production
+document also clears `servers` and security schemes as defense in depth, so the rendered reference
+has neither a request target nor credential input. The Phase 6 smoke check verified the emitted
+Scalar configuration and document from the running Production image.
 
 - **Decision**: built-in `AddRateLimiter` fixed-window policies by remote IP (default 10 requests per
   minute, configurable, spec FR-021) for `/api/auth/login`, `/api/auth/refresh`,

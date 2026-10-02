@@ -49,6 +49,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      Jwt__Signing__PrivateKeyPemPath: "${Jwt__Signing__PrivateKeyPemPath:-}"
+      Jwt__Signing__CertificatePath: "${Jwt__Signing__CertificatePath:-}"
+      Jwt__Signing__CertificatePassword: "${Jwt__Signing__CertificatePassword:-}"
     user: "${APP_UID}:${APP_GID}"
     ports:
       - "${API_PORT:-8080}:8080"

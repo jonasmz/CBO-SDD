@@ -21,7 +21,7 @@ public static class AuthEndpoints
                     new Dictionary<string, string[]> { ["credentials"] = ["Invalid credentials."] }),
                 _ => Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Invalid credentials")
             };
-        });
+        }).RequireRateLimiting(AuthService.Api.Security.RateLimitingSetup.AuthPolicy);
 
         group.MapPost("/refresh", async (
             RefreshTokenRequest request,
@@ -41,7 +41,7 @@ public static class AuthEndpoints
         {
             await handler.HandleAsync(request, cancellationToken);
             return Results.NoContent();
-        }).RequireRateLimiting(AuthService.Api.Security.RateLimitingSetup.AuthPolicy);
+        });
         group.MapPost("/reset-password", async (ResetPasswordRequest request, ResetPasswordHandler handler, CancellationToken cancellationToken) =>
         {
             var outcome = await handler.HandleAsync(request, cancellationToken);
