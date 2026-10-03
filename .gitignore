@@ -1,0 +1,17 @@
+bin/
+obj/
+*.user
+*.suo
+packages/
+.env
+secrets/
+*.pem
+*.pfx
+*.p12
+dev-keys/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.idea/

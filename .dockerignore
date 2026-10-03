@@ -1,0 +1,13 @@
+bin/
+obj/
+.git/
+.env
+secrets/
+*.pfx
+*.pem
+*.p12
+dev-keys/
+*.db
+.specify/
+specs/
+.claude/

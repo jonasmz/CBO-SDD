@@ -1,0 +1,49 @@
+# Production runtime. Self-contained: needs only the built image and named volumes.
+# Development/tooling services live in compose.dev.yaml (see .env.example COMPOSE_FILE).
+services:
+  auth-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: "${APP_UID:-10001}"
+        APP_GID: "${APP_GID:-10001}"
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Database__MigrateOnStartup: "${Database__MigrateOnStartup:-false}"
+      Jwt__Signing__PrivateKeyPemPath: "${Jwt__Signing__PrivateKeyPemPath:-}"
+      Jwt__Signing__CertificatePath: "${Jwt__Signing__CertificatePath:-}"
+      Jwt__Signing__CertificatePassword: "${Jwt__Signing__CertificatePassword:-}"
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - authservice-data:/data
+      # External PEM/PFX only: set SIGNING_KEY_DIR to an absolute host directory.
+      # Unset, this is an empty named volume and no host path is involved.
+      - "${SIGNING_KEY_DIR:-authservice-signing-none}:/run/secrets/signing:ro"
+
+  # Explicit/manual migration (advanced): docker compose run --rm migrate
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: "${APP_UID:-10001}"
+        APP_GID: "${APP_GID:-10001}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__MigrateOnStartup: "false"
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    command: ["--migrate"]
+    volumes:
+      - authservice-data:/data
+
+volumes:
+  authservice-data:
+    name: authservice-data
+  authservice-signing-none:
+    name: authservice-signing-none

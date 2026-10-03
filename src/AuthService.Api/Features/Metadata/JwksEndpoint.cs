@@ -1,0 +1,1 @@
+using AuthService.Infrastructure.Tokens; namespace AuthService.Api.Features.Metadata; public static class JwksEndpoint { public static void MapJwks(this IEndpointRouteBuilder app)=>app.MapGet("/.well-known/jwks.json",(JwksBuilder b,HttpResponse r)=>{r.Headers.CacheControl="public, max-age=300";return Results.Ok(b.Build());}).AllowAnonymous(); }

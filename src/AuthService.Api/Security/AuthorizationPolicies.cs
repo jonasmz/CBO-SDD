@@ -1,0 +1,1 @@
+using AuthService.Domain.Roles; namespace AuthService.Api.Security; public static class AuthorizationPolicies { public const string RequireAdministrator=nameof(RequireAdministrator); public static IServiceCollection AddAuthorizationPolicies(this IServiceCollection s){s.AddAuthorization(o=>o.AddPolicy(RequireAdministrator,p=>p.RequireRole(AppRoles.Administrator)));return s;} }

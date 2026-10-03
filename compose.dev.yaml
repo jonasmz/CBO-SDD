@@ -1,0 +1,48 @@
+# Development and tooling services. Loaded together with compose.yaml through
+# COMPOSE_FILE=compose.yaml:compose.dev.yaml (set in the development .env.example).
+# Production deployments use compose.yaml alone and never need HOST_PROJECT_DIR.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__MigrateOnStartup: "true"
+    volumes:
+      - "${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR to the repository path as seen by the host Docker daemon}:/workspace"
+      - nuget-cache:/nuget
+      - authservice-dev-data:/data
+
+  dev-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /workspace
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    profiles: ["run"]
+    env_file: .env
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      Database__MigrateOnStartup: "true"
+    command: dotnet run --no-launch-profile --project src/AuthService.Api
+    ports:
+      - "${DEV_API_PORT:-8081}:8080"
+    volumes:
+      - "${HOST_PROJECT_DIR:?set HOST_PROJECT_DIR to the repository path as seen by the host Docker daemon}:/workspace"
+      - nuget-cache:/nuget
+      - authservice-dev-data:/data
+
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+
+volumes:
+  authservice-dev-data:
+    name: authservice-dev-data
+  nuget-cache:
+    name: nuget-cache

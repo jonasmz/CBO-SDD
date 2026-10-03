@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);CA2100;CA3075;CA5350;CA5351;CA5379;CA5400;CA5401</WarningsAsErrors>
+  </PropertyGroup>
+</Project>
